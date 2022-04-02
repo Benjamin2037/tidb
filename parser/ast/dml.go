@@ -2642,6 +2642,7 @@ type ShowStmt struct {
 	Roles       []*auth.RoleIdentity // Used for show grants .. using
 	IfNotExists bool                 // Used for `show create database if not exists`
 	Extended    bool                 // Used for `show extended columns from ...`
+	Limit       *Limit               // Used for partial Show STMTs to limit Result Set row numbers.
 
 	// GlobalScope is used by `show variables` and `show bindings`
 	GlobalScope bool
@@ -2995,7 +2996,6 @@ func (n *ShowStmt) Accept(v Visitor) (Node, bool) {
 		}
 		n.Pattern = node.(*PatternLikeExpr)
 	}
-
 	if n.Where != nil {
 		node, ok := n.Where.Accept(v)
 		if !ok {
@@ -3003,7 +3003,46 @@ func (n *ShowStmt) Accept(v Visitor) (Node, bool) {
 		}
 		n.Where = node.(ExprNode)
 	}
+	if n.Limit != nil {
+		node, ok := n.Limit.Accept(v)
+		if !ok {
+			return n, false
+		}
+		n.Limit = node.(*Limit)
+	}
 	return v.Leave(n)
+}
+
+// Allow limit result set for partial SHOW cmd
+func (n *ShowStmt) NeedLimitRSRow() bool {
+	switch n.Tp {
+	// Show statements need to have consistence behavior with MySQL Does
+	case ShowEngines, ShowDatabases, ShowTables, ShowColumns, ShowTableStatus, ShowWarnings,
+		ShowCharset, ShowVariables, ShowStatus, ShowCollation, ShowIndex, ShowPlugins:
+		return true
+	default:
+		// There are five classes of Show STMT.
+		// 1) The STMT Only return one row:
+		//    ShowCreateTable, ShowCreateView, ShowCreateUser, ShowCreateDatabase, ShowMasterStatus,
+		//
+		// 2) The STMT is a MySQL syntax extend, so just keep it behavior as before:
+		//    ShowCreateSequence, ShowCreatePlacementPolicy, ShowConfig, ShowStatsExtended,
+		//    ShowStatsMeta, ShowStatsHistograms, ShowStatsTopN, ShowStatsBuckets, ShowStatsHealthy
+		//    ShowHistogramsInFlight, ShowColumnStatsUsage, ShowBindings, ShowBindingCacheStatus,
+		//    ShowPumpStatus, ShowDrainerStatus, ShowAnalyzeStatus, ShowRegions, ShowBuiltins,
+		//    ShowTableNextRowId, ShowBackups, ShowRestores, ShowImports, ShowCreateImport, ShowPlacement
+		//    ShowPlacementForDatabase, ShowPlacementForTable, ShowPlacementForPartition, ShowPlacementLabels
+		//
+		// 3) There is corelated statements in MySQL, but no limit result set return number also.
+		//    ShowGrants, ShowProcessList, ShowPrivileges, ShowBuiltins, ShowTableNextRowId
+		//
+		// 4) There is corelated statements in MySQL, but it seems not recommand to use them and likely deprecte in the future.
+		//    ShowProfile, ShowProfiles
+		//
+		// 5) Below STMTs do not implement fetch logic.
+		//    ShowTriggers, ShowProcedureStatus, ShowEvents, ShowErrors, ShowOpenTables.
+		return false
+	}
 }
 
 // WindowSpec is the specification of a window.

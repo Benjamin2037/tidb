@@ -1831,3 +1831,59 @@ func TestShowBindingCacheStatus(t *testing.T) {
 	tk.MustQuery("show binding_cache status").Check(testkit.Rows(
 		"1 1 198 Bytes 250 Bytes"))
 }
+
+func TestShowLimitReturnRow(t *testing.T) {
+	store, clean := testkit.CreateMockStore(t)
+	defer clean()
+
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("use test")
+	tk.MustExec("drop table if exists t")
+	tk.MustExec("create table t1(a int, b int, c int, d int, index idx_a(a), index idx_b(b))")
+	tk.MustExec("create table t2(a int, b int, c int, d int, index idx_a(a), index idx_b(b))")
+	tk.MustExec("INSERT INTO t1 VALUES(1,2,3,4)")
+	tk.MustExec("INSERT INTO t1 VALUES(4,3,1,2)")
+	tk.MustExec("SET @@sql_select_limit=1")
+	tk.MustExec("PREPARE stmt FROM \"SHOW COLUMNS FROM t1\"")
+	result := tk.MustQuery("EXECUTE stmt")
+	rows := result.Rows()
+	require.Equal(t, len(rows), 1)
+
+	tk.MustExec("PREPARE stmt FROM \"select * FROM t1\"")
+	result = tk.MustQuery("EXECUTE stmt")
+	rows = result.Rows()
+	require.Equal(t, len(rows), 1)
+
+	// Test case for other scenarios.
+	result = tk.MustQuery("SHOW ENGINES")
+	rows = result.Rows()
+	require.Equal(t, len(rows), 1)
+
+	tk.MustQuery("SHOW DATABASES like '%SCHEMA'").Check(testkit.RowsWithSep("|", "INFORMATION_SCHEMA"))
+
+	tk.MustQuery("SHOW TABLES where tables_in_test='t2'").Check(testkit.RowsWithSep("|", "t2"))
+
+	result = tk.MustQuery("SHOW TABLE STATUS where name='t2'")
+	rows = result.Rows()
+	require.Equal(t, rows[0][0], "t2")
+
+	tk.MustQuery("SHOW COLUMNS FROM t1 where Field ='d'").Check(testkit.RowsWithSep("|", ""+
+		"d int(11) YES  <nil> "))
+
+	tk.MustQuery("Show Charset where charset='gbk'").Check(testkit.RowsWithSep("|", ""+
+		"gbk Chinese Internal Code Specification gbk_chinese_ci 2"))
+
+	tk.MustQuery("Show Variables where variable_name ='max_allowed_packet'").Check(testkit.RowsWithSep("|", ""+
+		"max_allowed_packet 67108864"))
+
+	result = tk.MustQuery("SHOW status where variable_name ='server_id'")
+	rows = result.Rows()
+	require.Equal(t, rows[0][0], "server_id")
+
+	tk.MustQuery("Show Collation where collation='utf8_bin'").Check(testkit.RowsWithSep("|", ""+
+		"utf8_bin utf8 83 Yes Yes 1"))
+
+	result = tk.MustQuery("show index from t1 where key_name='idx_b'")
+	rows = result.Rows()
+	require.Equal(t, rows[0][2], "idx_b")
+}

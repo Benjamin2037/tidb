@@ -19,6 +19,7 @@ import (
 	"context"
 	gjson "encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,113 +129,122 @@ func (e *ShowExec) Next(ctx context.Context, req *chunk.Chunk) error {
 }
 
 func (e *ShowExec) fetchAll(ctx context.Context) error {
+	var err error = nil
+
+	// Temporary disable select limit to avoid miss the result.
+	oldSelectLimit := e.ctx.GetSessionVars().SelectLimit
+	e.ctx.GetSessionVars().SelectLimit = math.MaxUint64
+	defer func() {
+		// Restore session Var SelectLimit value.
+		e.ctx.GetSessionVars().SelectLimit = oldSelectLimit
+	}()
+
 	switch e.Tp {
 	case ast.ShowCharset:
-		return e.fetchShowCharset()
+		err = e.fetchShowCharset()
 	case ast.ShowCollation:
-		return e.fetchShowCollation()
+		err = e.fetchShowCollation()
 	case ast.ShowColumns:
-		return e.fetchShowColumns(ctx)
+		err = e.fetchShowColumns(ctx)
 	case ast.ShowConfig:
-		return e.fetchShowClusterConfigs(ctx)
+		err = e.fetchShowClusterConfigs(ctx)
 	case ast.ShowCreateTable:
-		return e.fetchShowCreateTable()
+		err = e.fetchShowCreateTable()
 	case ast.ShowCreateSequence:
-		return e.fetchShowCreateSequence()
+		err = e.fetchShowCreateSequence()
 	case ast.ShowCreateUser:
-		return e.fetchShowCreateUser(ctx)
+		err = e.fetchShowCreateUser(ctx)
 	case ast.ShowCreateView:
-		return e.fetchShowCreateView()
+		err = e.fetchShowCreateView()
 	case ast.ShowCreateDatabase:
-		return e.fetchShowCreateDatabase()
+		err = e.fetchShowCreateDatabase()
 	case ast.ShowCreatePlacementPolicy:
-		return e.fetchShowCreatePlacementPolicy()
+		err = e.fetchShowCreatePlacementPolicy()
 	case ast.ShowDatabases:
-		return e.fetchShowDatabases()
+		err = e.fetchShowDatabases()
 	case ast.ShowDrainerStatus:
-		return e.fetchShowPumpOrDrainerStatus(node.DrainerNode)
+		err = e.fetchShowPumpOrDrainerStatus(node.DrainerNode)
 	case ast.ShowEngines:
-		return e.fetchShowEngines(ctx)
+		err = e.fetchShowEngines(ctx)
 	case ast.ShowGrants:
-		return e.fetchShowGrants()
+		err = e.fetchShowGrants()
 	case ast.ShowIndex:
-		return e.fetchShowIndex()
+		err = e.fetchShowIndex()
 	case ast.ShowProcedureStatus:
-		return e.fetchShowProcedureStatus()
+		err = e.fetchShowProcedureStatus()
 	case ast.ShowPumpStatus:
-		return e.fetchShowPumpOrDrainerStatus(node.PumpNode)
+		err = e.fetchShowPumpOrDrainerStatus(node.PumpNode)
 	case ast.ShowStatus:
-		return e.fetchShowStatus()
+		err = e.fetchShowStatus()
 	case ast.ShowTables:
-		return e.fetchShowTables()
+		err = e.fetchShowTables()
 	case ast.ShowOpenTables:
-		return e.fetchShowOpenTables()
+		err = e.fetchShowOpenTables()
 	case ast.ShowTableStatus:
-		return e.fetchShowTableStatus(ctx)
+		err = e.fetchShowTableStatus(ctx)
 	case ast.ShowTriggers:
-		return e.fetchShowTriggers()
+		err = e.fetchShowTriggers()
 	case ast.ShowVariables:
-		return e.fetchShowVariables()
+		err = e.fetchShowVariables()
 	case ast.ShowWarnings:
-		return e.fetchShowWarnings(false)
+		err = e.fetchShowWarnings(false)
 	case ast.ShowErrors:
-		return e.fetchShowWarnings(true)
+		err = e.fetchShowWarnings(true)
 	case ast.ShowProcessList:
-		return e.fetchShowProcessList()
+		err = e.fetchShowProcessList()
 	case ast.ShowEvents:
 		// empty result
 	case ast.ShowStatsExtended:
-		return e.fetchShowStatsExtended()
+		err = e.fetchShowStatsExtended()
 	case ast.ShowStatsMeta:
-		return e.fetchShowStatsMeta()
+		err = e.fetchShowStatsMeta()
 	case ast.ShowStatsHistograms:
-		return e.fetchShowStatsHistogram()
+		err = e.fetchShowStatsHistogram()
 	case ast.ShowStatsBuckets:
-		return e.fetchShowStatsBuckets()
+		err = e.fetchShowStatsBuckets()
 	case ast.ShowStatsTopN:
-		return e.fetchShowStatsTopN()
+		err = e.fetchShowStatsTopN()
 	case ast.ShowStatsHealthy:
 		e.fetchShowStatsHealthy()
-		return nil
 	case ast.ShowHistogramsInFlight:
 		e.fetchShowHistogramsInFlight()
-		return nil
 	case ast.ShowColumnStatsUsage:
-		return e.fetchShowColumnStatsUsage()
+		err = e.fetchShowColumnStatsUsage()
 	case ast.ShowPlugins:
-		return e.fetchShowPlugins()
+		err = e.fetchShowPlugins()
 	case ast.ShowProfiles:
 		// empty result
 	case ast.ShowMasterStatus:
-		return e.fetchShowMasterStatus()
+		err = e.fetchShowMasterStatus()
 	case ast.ShowPrivileges:
-		return e.fetchShowPrivileges()
+		err = e.fetchShowPrivileges()
 	case ast.ShowBindings:
-		return e.fetchShowBind()
+		err = e.fetchShowBind()
 	case ast.ShowBindingCacheStatus:
-		return e.fetchShowBindingCacheStatus(ctx)
+		err = e.fetchShowBindingCacheStatus(ctx)
 	case ast.ShowAnalyzeStatus:
-		return e.fetchShowAnalyzeStatus()
+		err = e.fetchShowAnalyzeStatus()
 	case ast.ShowRegions:
-		return e.fetchShowTableRegions()
+		err = e.fetchShowTableRegions()
 	case ast.ShowBuiltins:
-		return e.fetchShowBuiltins()
+		err = e.fetchShowBuiltins()
 	case ast.ShowBackups:
-		return e.fetchShowBRIE(ast.BRIEKindBackup)
+		err = e.fetchShowBRIE(ast.BRIEKindBackup)
 	case ast.ShowRestores:
-		return e.fetchShowBRIE(ast.BRIEKindRestore)
+		err = e.fetchShowBRIE(ast.BRIEKindRestore)
 	case ast.ShowPlacementLabels:
-		return e.fetchShowPlacementLabels(ctx)
+		err = e.fetchShowPlacementLabels(ctx)
 	case ast.ShowPlacement:
-		return e.fetchShowPlacement(ctx)
+		err = e.fetchShowPlacement(ctx)
 	case ast.ShowPlacementForDatabase:
-		return e.fetchShowPlacementForDB(ctx)
+		err = e.fetchShowPlacementForDB(ctx)
 	case ast.ShowPlacementForTable:
-		return e.fetchShowPlacementForTable(ctx)
+		err = e.fetchShowPlacementForTable(ctx)
 	case ast.ShowPlacementForPartition:
-		return e.fetchShowPlacementForPartition(ctx)
+		err = e.fetchShowPlacementForPartition(ctx)
 	}
-	return nil
+
+	return err
 }
 
 // visibleChecker checks if a stmt is visible for a certain user.
