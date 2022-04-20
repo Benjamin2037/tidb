@@ -18,6 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/pingcap/tidb/ddl/addindex"
 	"io/fs"
 	"os"
 	"runtime"
@@ -758,4 +759,10 @@ func stringToList(repairString string) []string {
 	return strings.FieldsFunc(repairString, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '"'
 	})
+}
+
+// TODO: delete later. just for cycle import test.
+func ref() {
+	// ref here because will init the config.
+	addindex.IndexCycleReference()
 }

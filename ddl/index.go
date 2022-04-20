@@ -16,6 +16,7 @@ package ddl
 
 import (
 	"context"
+	"github.com/pingcap/tidb/ddl/addindex"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1632,4 +1633,9 @@ func findIndexesByColName(indexes []*model.IndexInfo, colName string) ([]*model.
 		}
 	}
 	return idxInfos, offsets
+}
+
+// TODO: delete later. just for cycle import test.
+func ref() {
+	addindex.IndexCycleReference()
 }
