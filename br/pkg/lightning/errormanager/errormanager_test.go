@@ -25,11 +25,10 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/pingcap/tidb/br/pkg/lightning/config"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
-
-	"github.com/pingcap/tidb/br/pkg/lightning/config"
-	"github.com/pingcap/tidb/br/pkg/utils"
 )
 
 func TestInit(t *testing.T) {
@@ -168,7 +167,7 @@ func TestResolveAllConflictKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	resolved := atomic.NewInt64(0)
-	pool := utils.NewWorkerPool(16, "resolve duplicate rows")
+	pool := utildb.NewWorkerPool(16, "resolve duplicate rows")
 	err = em.ResolveAllConflictKeys(
 		ctx, "test", pool,
 		func(ctx context.Context, handleRows [][2][]byte) error {
