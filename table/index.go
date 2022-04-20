@@ -76,8 +76,3 @@ type Index interface {
 	// and return the buffer, if it is nil, FetchValues will allocate the buffer instead.
 	FetchValues(row []types.Datum, columns []types.Datum) ([]types.Datum, error)
 }
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	// addindex.IndexCycleReference()
-}

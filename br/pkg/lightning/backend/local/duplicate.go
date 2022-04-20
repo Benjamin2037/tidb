@@ -34,8 +34,8 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"github.com/pingcap/tidb/br/pkg/logutil"
 	"github.com/pingcap/tidb/br/pkg/restore/split"
-	"github.com/pingcap/tidb/br/pkg/utils"
-	"github.com/pingcap/tidb/distsql"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
+	"github.com/pingcap/tidb/distsql/request"
 	tidbkv "github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/table"
@@ -217,7 +217,7 @@ func tableHandleKeyRanges(tableInfo *model.TableInfo) ([]tidbkv.KeyRange, error)
 		ranges = ranger.FullRange()
 	}
 	tableIDs := physicalTableIDs(tableInfo)
-	return distsql.TableHandleRangesToKVRanges(nil, tableIDs, tableInfo.IsCommonHandle, ranges, nil)
+	return request.TableHandleRangesToKVRanges(nil, tableIDs, tableInfo.IsCommonHandle, ranges, nil)
 }
 
 // tableIndexKeyRanges returns all key ranges associated with the tableInfo and indexInfo.
@@ -225,7 +225,7 @@ func tableIndexKeyRanges(tableInfo *model.TableInfo, indexInfo *model.IndexInfo)
 	tableIDs := physicalTableIDs(tableInfo)
 	var keyRanges []tidbkv.KeyRange
 	for _, tid := range tableIDs {
-		partitionKeysRanges, err := distsql.IndexRangesToKVRanges(nil, tid, indexInfo.ID, ranger.FullRange(), nil)
+		partitionKeysRanges, err := request.IndexRangesToKVRanges(nil, tid, indexInfo.ID, ranger.FullRange(), nil)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -626,7 +626,7 @@ func (m *DuplicateManager) CollectDuplicateRowsFromDupDB(ctx context.Context, du
 	logger := m.logger
 	logger.Info("[detect-dupe] collect duplicate rows from local duplicate db", zap.Int("tasks", len(tasks)))
 
-	pool := utils.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from duplicate db")
+	pool := utildb.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from duplicate db")
 	g, gCtx := errgroup.WithContext(ctx)
 	for _, task := range tasks {
 		task := task
@@ -702,7 +702,7 @@ func (m *DuplicateManager) processRemoteDupTaskOnce(
 	task dupTask,
 	logger log.Logger,
 	importClientFactory ImportClientFactory,
-	regionPool *utils.WorkerPool,
+	regionPool *utildb.WorkerPool,
 	remainKeyRanges *pendingKeyRanges,
 ) (madeProgress bool, err error) {
 	var (
@@ -778,7 +778,7 @@ func (m *DuplicateManager) processRemoteDupTask(
 	task dupTask,
 	logger log.Logger,
 	importClientFactory ImportClientFactory,
-	regionPool *utils.WorkerPool,
+	regionPool *utildb.WorkerPool,
 ) error {
 	remainAttempts := maxDupCollectAttemptTimes
 	remainKeyRanges := newPendingKeyRanges(task.KeyRange)
@@ -816,8 +816,8 @@ func (m *DuplicateManager) CollectDuplicateRowsFromTiKV(ctx context.Context, imp
 	logger := m.logger
 	logger.Info("[detect-dupe] collect duplicate rows from tikv", zap.Int("tasks", len(tasks)))
 
-	taskPool := utils.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from tikv")
-	regionPool := utils.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from tikv by region")
+	taskPool := utildb.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from tikv")
+	regionPool := utildb.NewWorkerPool(uint(m.concurrency), "collect duplicate rows from tikv by region")
 	g, gCtx := errgroup.WithContext(ctx)
 	for _, task := range tasks {
 		task := task

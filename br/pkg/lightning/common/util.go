@@ -32,7 +32,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
-	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	tmysql "github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/model"
 	"go.uber.org/zap"
@@ -140,7 +140,7 @@ func IsEmptyDir(name string) bool {
 // SQLWithRetry constructs a retryable transaction.
 type SQLWithRetry struct {
 	// either *sql.DB or *sql.Conn
-	DB           utils.DBExecutor
+	DB           utildb.DBExecutor
 	Logger       log.Logger
 	HideQueryLog bool
 }
@@ -168,7 +168,7 @@ outside:
 		// do not retry NotFound error
 		case errors.IsNotFound(err):
 			break outside
-		case utils.IsRetryableError(err):
+		case utildb.IsRetryableError(err):
 			logger.Warn(purpose+" failed but going to try again", log.ShortError(err))
 			continue
 		default:

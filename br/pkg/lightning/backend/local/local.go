@@ -50,7 +50,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/membuf"
 	"github.com/pingcap/tidb/br/pkg/pdutil"
 	"github.com/pingcap/tidb/br/pkg/restore/split"
-	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"github.com/pingcap/tidb/br/pkg/version"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -322,7 +322,7 @@ func NewLocalBackend(
 		dupeConcurrency:   rangeConcurrency * 2,
 		batchWriteKVPairs: cfg.TikvImporter.SendKVPairs,
 		checkpointEnabled: cfg.Checkpoint.Enable,
-		maxOpenFiles:      utils.MaxInt(maxOpenFiles, openFilesLowerThreshold),
+		maxOpenFiles:      utildb.MaxInt(maxOpenFiles, openFilesLowerThreshold),
 
 		engineMemCacheSize:      int(cfg.TikvImporter.EngineMemCacheSize),
 		localWriterMemCacheSize: int64(cfg.TikvImporter.LocalWriterMemCacheSize),
@@ -1165,7 +1165,7 @@ loopWrite:
 
 		for i := 0; i < len(metas); i += batch {
 			start := i * batch
-			end := utils.MinInt((i+1)*batch, len(metas))
+			end := utildb.MinInt((i+1)*batch, len(metas))
 			ingestMetas := metas[start:end]
 			errCnt := 0
 			for errCnt < maxRetryTimes {
@@ -1445,7 +1445,7 @@ func (local *local) ResolveDuplicateRows(ctx context.Context, tbl table.Table, t
 	}
 
 	errLimiter := rate.NewLimiter(1, 1)
-	pool := utils.NewWorkerPool(uint(local.dupeConcurrency), "resolve duplicate rows")
+	pool := utildb.NewWorkerPool(uint(local.dupeConcurrency), "resolve duplicate rows")
 	err = local.errorMgr.ResolveAllConflictKeys(
 		ctx, tableName, pool,
 		func(ctx context.Context, handleRows [][2][]byte) error {

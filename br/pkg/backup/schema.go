@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -81,7 +82,7 @@ func (ss *Schemas) BackupSchemas(
 		ctx = opentracing.ContextWithSpan(ctx, span1)
 	}
 
-	workerPool := utils.NewWorkerPool(concurrency, "Schemas")
+	workerPool := utildb.NewWorkerPool(concurrency, "Schemas")
 	errg, ectx := errgroup.WithContext(ctx)
 	startAll := time.Now()
 	op := metautil.AppendSchema

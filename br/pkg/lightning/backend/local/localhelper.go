@@ -35,7 +35,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"github.com/pingcap/tidb/br/pkg/logutil"
 	"github.com/pingcap/tidb/br/pkg/restore/split"
-	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"github.com/pingcap/tidb/util/codec"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -186,7 +186,7 @@ func (local *local) SplitAndScatterRegionByRanges(
 
 		var syncLock sync.Mutex
 		// TODO, make this size configurable
-		size := utils.MinInt(len(splitKeyMap), runtime.GOMAXPROCS(0))
+		size := utildb.MinInt(len(splitKeyMap), runtime.GOMAXPROCS(0))
 		ch := make(chan *splitInfo, size)
 		eg, splitCtx := errgroup.WithContext(ctx)
 

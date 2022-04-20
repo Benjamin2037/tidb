@@ -16,12 +16,11 @@ package kv
 
 import (
 	"fmt"
-
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/table"
-	"github.com/pingcap/tidb/table/tables"
 	tablecontext "github.com/pingcap/tidb/table/tables/context"
+	tblutil "github.com/pingcap/tidb/table/tables/util"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/types"
 )
@@ -43,13 +42,13 @@ func (t *TableKVDecoder) DecodeHandleFromRowKey(key []byte) (kv.Handle, error) {
 }
 
 func (t *TableKVDecoder) DecodeHandleFromIndex(indexInfo *model.IndexInfo, key []byte, value []byte) (kv.Handle, error) {
-	cols := tables.BuildRowcodecColInfoForIndexColumns(indexInfo, t.tbl.Meta())
+	cols := tblutil.BuildRowcodecColInfoForIndexColumns(indexInfo, t.tbl.Meta())
 	return tablecodec.DecodeIndexHandle(key, value, len(cols))
 }
 
 // DecodeRawRowData decodes raw row data into a datum slice and a (columnID:columnValue) map.
 func (t *TableKVDecoder) DecodeRawRowData(h kv.Handle, value []byte) ([]types.Datum, map[int64]types.Datum, error) {
-	return tables.DecodeRawRowData(t.se, t.tbl.Meta(), h, t.tbl.Cols(), value)
+	return tblutil.DecodeRawRowData(t.se, t.tbl.Meta(), h, t.tbl.Cols(), value)
 }
 
 func (t *TableKVDecoder) DecodeRawRowDataAsStr(h kv.Handle, value []byte) (res string) {

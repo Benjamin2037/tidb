@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,7 +68,7 @@ type Client struct {
 	pdClient      pd.Client
 	toolClient    SplitClient
 	fileImporter  FileImporter
-	workerPool    *utils.WorkerPool
+	workerPool    *utildb.WorkerPool
 	tlsConf       *tls.Config
 	keepaliveConf keepalive.ClientParameters
 
@@ -350,7 +351,7 @@ func (rc *Client) GetFilesInRawRange(startKey []byte, endKey []byte, cf string) 
 
 // SetConcurrency sets the concurrency of dbs tables files.
 func (rc *Client) SetConcurrency(c uint) {
-	rc.workerPool = utils.NewWorkerPool(c, "file")
+	rc.workerPool = utildb.NewWorkerPool(c, "file")
 }
 
 // EnableOnline sets the mode of restore to online.
@@ -694,7 +695,7 @@ func (rc *Client) createTablesWithDBPool(ctx context.Context,
 	createOneTable func(ctx context.Context, db *DB, t *metautil.Table) error,
 	tables []*metautil.Table) error {
 	eg, ectx := errgroup.WithContext(ctx)
-	workers := utils.NewWorkerPool(uint(len(rc.dbPool)), "DDL workers")
+	workers := utildb.NewWorkerPool(uint(len(rc.dbPool)), "DDL workers")
 	for _, t := range tables {
 		table := t
 		workers.ApplyWithIDInErrorGroup(eg, func(id uint64) error {
@@ -708,7 +709,7 @@ func (rc *Client) createTablesWithDBPool(ctx context.Context,
 func (rc *Client) createTablesInWorkerPool(ctx context.Context, dom *domain.Domain, tables []*metautil.Table, newTS uint64, outCh chan<- CreatedTable) error {
 	eg, ectx := errgroup.WithContext(ctx)
 	rater := logutil.TraceRateOver(logutil.MetricTableCreatedCounter)
-	workers := utils.NewWorkerPool(uint(len(rc.dbPool)), "Create Tables Worker")
+	workers := utildb.NewWorkerPool(uint(len(rc.dbPool)), "Create Tables Worker")
 	numOfTables := len(tables)
 
 	for lastSent := 0; lastSent < numOfTables; lastSent += int(rc.batchDdlSize) {
@@ -1028,7 +1029,7 @@ func (rc *Client) GoValidateChecksum(
 		defer wg.Done()
 		rc.updateMetaAndLoadStats(ctx, loadStatCh)
 	}()
-	workers := utils.NewWorkerPool(defaultChecksumConcurrency, "RestoreChecksum")
+	workers := utildb.NewWorkerPool(defaultChecksumConcurrency, "RestoreChecksum")
 	go func() {
 		eg, ectx := errgroup.WithContext(ctx)
 		defer func() {

@@ -16,6 +16,7 @@ package tables
 
 import (
 	"context"
+	"github.com/pingcap/tidb/ddl/addindex"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -339,4 +340,9 @@ func TryAppendCommonHandleRowcodecColInfos(colInfo []rowcodec.ColInfo, tblInfo *
 		}
 	}
 	return colInfo
+}
+
+// TODO: delete later. just for cycle import test.
+func ref() {
+	addindex.IndexCycleReference()
 }

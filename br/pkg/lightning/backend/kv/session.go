@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"github.com/pingcap/tidb/br/pkg/lightning/manual"
-	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -97,7 +97,7 @@ func (mb *kvMemBuf) Recycle(buf *bytesBuf) {
 
 func (mb *kvMemBuf) AllocateBuf(size int) {
 	mb.Lock()
-	size = utils.MaxInt(units.MiB, int(utils.NextPowerOfTwo(int64(size)))*2)
+	size = utildb.MaxInt(units.MiB, int(utildb.NextPowerOfTwo(int64(size)))*2)
 	if len(mb.availableBufs) > 0 && mb.availableBufs[0].cap >= size {
 		mb.buf = mb.availableBufs[0]
 		mb.availableBufs = mb.availableBufs[1:]

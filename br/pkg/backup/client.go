@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"io"
 	"os"
 	"strings"
@@ -519,7 +520,7 @@ func (bc *Client) BackupRanges(
 	}
 
 	// we collect all files in a single goroutine to avoid thread safety issues.
-	workerPool := utils.NewWorkerPool(concurrency, "Ranges")
+	workerPool := utildb.NewWorkerPool(concurrency, "Ranges")
 	eg, ectx := errgroup.WithContext(ctx)
 	for id, r := range ranges {
 		id := id
@@ -979,7 +980,7 @@ func doSendBackup(
 // Stop receiving response if respFn returns error.
 func SendBackup(
 	ctx context.Context,
-	// the `storeID` seems only used for logging now, maybe we can remove it then?
+// the `storeID` seems only used for logging now, maybe we can remove it then?
 	storeID uint64,
 	client backuppb.BackupClient,
 	req backuppb.BackupRequest,

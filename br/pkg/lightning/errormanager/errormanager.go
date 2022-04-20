@@ -18,6 +18,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"math"
 	"strings"
 	"sync"
@@ -33,7 +34,6 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"github.com/pingcap/tidb/br/pkg/redact"
-	"github.com/pingcap/tidb/br/pkg/utils"
 )
 
 const (
@@ -337,7 +337,7 @@ func (em *ErrorManager) RecordIndexConflictError(
 func (em *ErrorManager) ResolveAllConflictKeys(
 	ctx context.Context,
 	tableName string,
-	pool *utils.WorkerPool,
+	pool *utildb.WorkerPool,
 	fn func(ctx context.Context, handleRows [][2][]byte) error,
 ) error {
 	if em.db == nil {

@@ -4,6 +4,7 @@ package restore
 
 import (
 	"context"
+	"github.com/pingcap/tidb/br/pkg/utils/utildb"
 	"sync"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/pingcap/tidb/br/pkg/metautil"
 	"github.com/pingcap/tidb/br/pkg/rtree"
 	"github.com/pingcap/tidb/br/pkg/summary"
-	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/parser/model"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -284,7 +284,7 @@ func (b *tikvSender) splitWorker(ctx context.Context,
 		summary.CollectDuration("split region", elapsed)
 	}()
 
-	pool := utils.NewWorkerPool(concurrency, "split")
+	pool := utildb.NewWorkerPool(concurrency, "split")
 	for {
 		select {
 		case <-ectx.Done():
