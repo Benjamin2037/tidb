@@ -80,6 +80,8 @@ const (
 	DefExpensiveQueryTimeThreshold = 60
 	// DefMemoryUsageAlarmRatio is the threshold triggering an alarm which the memory usage of tidb-server instance exceeds.
 	DefMemoryUsageAlarmRatio = 0.8
+	// DefLightningSortPath is the default sort dir for add index lightning solution
+	DefLightningSortPath = ""
 )
 
 // Valid config maps
@@ -248,6 +250,8 @@ type Config struct {
 	MaxBallastObjectSize int `toml:"max-ballast-object-size" json:"max-ballast-object-size"`
 	// BallastObjectSize set the initial size of the ballast object, the unit is byte.
 	BallastObjectSize int `toml:"ballast-object-size" json:"ballast-object-size"`
+	// LightningSortPath used to specific the lighting DDL local sort path.
+	LightningSortPath string `toml:"lightning-sort-path" json:"lightning-sort-path"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed
