@@ -201,7 +201,7 @@ func main() {
 	printInfo()
 	setupBinlogClient()
 	setupMetrics()
-
+	addindex.InitIndexOptimize()
 	storage, dom := createStoreAndDomain()
 	svr := createServer(storage, dom)
 
@@ -759,10 +759,4 @@ func stringToList(repairString string) []string {
 	return strings.FieldsFunc(repairString, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '"'
 	})
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	// ref here because will init the config.
-	addindex.IndexCycleReference()
 }

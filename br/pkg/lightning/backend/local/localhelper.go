@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"runtime"
 	"sort"
@@ -44,6 +45,8 @@ import (
 
 const (
 	retrySplitMaxWaitTime = 4 * time.Second
+	// TODO: add index optimize
+	RegionSizeStats = "RegionSizeStats"
 )
 
 var (
@@ -149,11 +152,16 @@ func (local *local) SplitAndScatterRegionByRanges(
 
 		var tableRegionStats map[uint64]int64
 		if tableInfo != nil {
-			tableRegionStats, err = fetchTableRegionSizeStats(ctx, db, tableInfo.ID)
-			if err != nil {
-				log.L().Warn("fetch table region size statistics failed",
-					zap.String("table", tableInfo.Name), zap.Error(err))
-				tableRegionStats = make(map[uint64]int64)
+			if vals := ctx.Value(RegionSizeStats); vals != nil {
+				tableRegionStats = vals.(map[uint64]int64)
+				log.L().Info(fmt.Sprintf("tableRegionStats(%d) from tidb", len(tableRegionStats)))
+			} else {
+				tableRegionStats, err = fetchTableRegionSizeStats(ctx, db, tableInfo.ID)
+				if err != nil {
+					log.L().Warn("fetch table region size statistics failed",
+						zap.String("table", tableInfo.Name), zap.Error(err))
+					tableRegionStats = make(map[uint64]int64)
+				}
 			}
 		}
 

@@ -572,9 +572,9 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 		}
 		var done bool
 		done, ver, err = doReorgWorkForCreateIndex(w, d, t, job, tbl, indexInfo)
-		{
+		if done && err == nil {
 			// just log info.
-			err := addindex.FinishIndexOp(w.ctx, done, job.StartTS)
+			err := addindex.FinishIndexOp(w.ctx, job.StartTS, tbl, indexInfo.Unique)
 			if err != nil {
 				logutil.BgLogger().Error("FinishIndexOp err2" + err.Error())
 				err = errors.Trace(err)
@@ -1080,12 +1080,13 @@ type addIndexWorker struct {
 	batchCheckKeys     []kv.Key
 	distinctCheckFlags []bool
 	//
-	cache *addindex.WorkerKVCache
+	cache   *addindex.WorkerKVCache
+	startTs uint64
 }
 
-func newAddIndexWorker(sessCtx sessionctx.Context, worker *worker, id int, t table.PhysicalTable, indexInfo *model.IndexInfo, decodeColMap map[int64]decoder.Column, sqlMode mysql.SQLMode) *addIndexWorker {
+func newAddIndexWorker(sessCtx sessionctx.Context, worker *worker, id int, t table.PhysicalTable, indexInfo *model.IndexInfo, decodeColMap map[int64]decoder.Column, sqlMode mysql.SQLMode, startTs uint64) *addIndexWorker {
 	cache := addindex.NewWorkerKVCache()
-	index := tables.NewIndex4Lightning(t.GetPhysicalID(), t.Meta(), indexInfo, &cache)
+	index := tables.NewIndex4Lightning(t.GetPhysicalID(), t.Meta(), indexInfo, &cache, startTs)
 	rowDecoder := decoder.NewRowDecoder(t, t.WritableCols(), decodeColMap)
 	return &addIndexWorker{
 		baseIndexWorker: baseIndexWorker{
@@ -1097,8 +1098,9 @@ func newAddIndexWorker(sessCtx sessionctx.Context, worker *worker, id int, t tab
 			metricCounter:  metrics.BackfillTotalCounter.WithLabelValues("add_idx_rate"),
 			sqlMode:        sqlMode,
 		},
-		cache: &cache,
-		index: index,
+		cache:   &cache,
+		index:   index,
+		startTs: startTs,
 	}
 }
 
@@ -1340,7 +1342,9 @@ func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskC
 			panic("panic test")
 		}
 	})
-
+	if *addindex.IndexDDLLightning == true {
+		return w.backfillData(handleRange)
+	}
 	oprStartTime := time.Now()
 	errInTxn = kv.RunInNewTxn(context.Background(), w.sessCtx.GetStore(), true, func(ctx context.Context, txn kv.Transaction) error {
 		taskCtx.addedCount = 0
@@ -1401,10 +1405,6 @@ func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskC
 // Note that index columns values may change, and an index is not allowed to be added, so the txn will rollback and retry.
 // BackfillDataInTxn will add w.batchCnt indices once, default value of w.batchCnt is 128.
 func (w *addIndexWorker) backfillData(handleRange reorgBackfillTask) (taskCtx backfillTaskContext, errInTxn error) {
-	if w.cache == nil {
-		wc := addindex.NewWorkerKVCache()
-		w.cache = &wc
-	}
 	oprStartTime := time.Now()
 
 	txn, err := w.sessCtx.GetStore().Begin()
@@ -1445,7 +1445,7 @@ func (w *addIndexWorker) backfillData(handleRange reorgBackfillTask) (taskCtx ba
 	}
 
 	// log.L().Info("[debug-fetch] finish idxRecord info", zap.Int("scanCount", taskCtx.scanCount), zap.Int("addedCount", taskCtx.addedCount))
-	errInTxn = addindex.FlushKeyValSync(context.TODO(), 0, w.cache)
+	errInTxn = addindex.FlushKeyValSync(context.TODO(), w.startTs, w.cache)
 	if errInTxn != nil {
 		addindex.LogError("FlushKeyValSync %d paris err: %v.", len(w.cache.Fetch()), errInTxn.Error())
 	}
@@ -1729,9 +1729,4 @@ func findIndexesByColName(indexes []*model.IndexInfo, colName string) ([]*model.
 		}
 	}
 	return idxInfos, offsets
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	addindex.IndexCycleReference()
 }

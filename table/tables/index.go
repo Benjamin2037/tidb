@@ -43,7 +43,8 @@ type index struct {
 	initNeedRestoreData sync.Once
 	needRestoredData    bool
 	//
-	cache *addindex.WorkerKVCache
+	cache   *addindex.WorkerKVCache
+	startTs uint64
 }
 
 // NeedRestoredData checks whether the index columns needs restored data.
@@ -59,11 +60,11 @@ func NeedRestoredData(idxCols []*model.IndexColumn, colInfos []*model.ColumnInfo
 
 func NewIndex(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.IndexInfo) table.Index {
 	// The prefix can't encode from tblInfo.ID, because table partition may change the id to partition id.
-	return NewIndex4Lightning(physicalID, tblInfo, indexInfo, nil)
+	return NewIndex4Lightning(physicalID, tblInfo, indexInfo, nil, 0)
 }
 
 // NewIndex builds a new Index object.
-func NewIndex4Lightning(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.IndexInfo, cache *addindex.WorkerKVCache) table.Index {
+func NewIndex4Lightning(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.IndexInfo, cache *addindex.WorkerKVCache, startTs uint64) table.Index {
 	// The prefix can't encode from tblInfo.ID, because table partition may change the id to partition id.
 	var prefix kv.Key
 	if indexInfo.Global {
@@ -79,6 +80,7 @@ func NewIndex4Lightning(physicalID int64, tblInfo *model.TableInfo, indexInfo *m
 		prefix:   prefix,
 		phyTblID: physicalID,
 		cache:    cache,
+		startTs:  startTs,
 	}
 	return index
 }
@@ -156,7 +158,7 @@ func (c *index) Create(sctx sessionctx.Context, txn kv.Transaction, indexedValue
 		return nil, err
 	}
 	// TODO: optimize index ddl
-	if *addindex.IndexDDLLightning {
+	if *addindex.IndexDDLLightning && c.cache != nil {
 		// err = sst.IndexOperator(ctx, c.jobStartTs, key, idxVal)
 		c.cache.PushKeyValue(key, idxVal, h)
 		return nil, nil
@@ -353,9 +355,4 @@ func TryAppendCommonHandleRowcodecColInfos(colInfo []rowcodec.ColInfo, tblInfo *
 		}
 	}
 	return colInfo
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	addindex.IndexCycleReference()
 }
