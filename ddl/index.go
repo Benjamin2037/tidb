@@ -16,7 +16,10 @@ package ddl
 
 import (
 	"context"
+	"fmt"
 	"github.com/pingcap/tidb/ddl/addindex"
+	"github.com/pingcap/tidb/util/sqlexec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -557,9 +560,27 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 		if err != nil {
 			return ver, errors.Trace(err)
 		}
-
+		err = addindex.PrepareIndexOp(w.ctx, addindex.DDLInfo{
+			job.SchemaName,
+			tblInfo,
+			job.StartTS,
+			indexInfo.Unique,
+			&execPool{w.sessPool},
+		})
+		if err != nil {
+			return ver, errors.Trace(err)
+		}
 		var done bool
 		done, ver, err = doReorgWorkForCreateIndex(w, d, t, job, tbl, indexInfo)
+		{
+			// just log info.
+			err := addindex.FinishIndexOp(w.ctx, done, job.StartTS)
+			if err != nil {
+				logutil.BgLogger().Error("FinishIndexOp err2" + err.Error())
+				err = errors.Trace(err)
+			}
+		}
+
 		if !done {
 			return ver, err
 		}
@@ -583,6 +604,22 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 	}
 
 	return ver, errors.Trace(err)
+}
+
+type execPool struct {
+	*sessionPool
+}
+
+func (e *execPool) Get() (sqlexec.RestrictedSQLExecutor, error) {
+	ctx, err := e.get()
+	if err != nil {
+		return nil, err
+	}
+	return ctx.(sqlexec.RestrictedSQLExecutor), nil
+}
+
+func (e *execPool) Put(exec sqlexec.RestrictedSQLExecutor) {
+	e.put(exec.(sessionctx.Context))
 }
 
 func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Job,
@@ -1042,10 +1079,13 @@ type addIndexWorker struct {
 	idxKeyBufs         [][]byte
 	batchCheckKeys     []kv.Key
 	distinctCheckFlags []bool
+	//
+	cache *addindex.WorkerKVCache
 }
 
 func newAddIndexWorker(sessCtx sessionctx.Context, worker *worker, id int, t table.PhysicalTable, indexInfo *model.IndexInfo, decodeColMap map[int64]decoder.Column, sqlMode mysql.SQLMode) *addIndexWorker {
-	index := tables.NewIndex(t.GetPhysicalID(), t.Meta(), indexInfo)
+	cache := addindex.NewWorkerKVCache()
+	index := tables.NewIndex4Lightning(t.GetPhysicalID(), t.Meta(), indexInfo, &cache)
 	rowDecoder := decoder.NewRowDecoder(t, t.WritableCols(), decodeColMap)
 	return &addIndexWorker{
 		baseIndexWorker: baseIndexWorker{
@@ -1057,6 +1097,7 @@ func newAddIndexWorker(sessCtx sessionctx.Context, worker *worker, id int, t tab
 			metricCounter:  metrics.BackfillTotalCounter.WithLabelValues("add_idx_rate"),
 			sqlMode:        sqlMode,
 		},
+		cache: &cache,
 		index: index,
 	}
 }
@@ -1293,9 +1334,6 @@ func (w *addIndexWorker) batchCheckUniqueKey(txn kv.Transaction, idxRecords []*i
 	return nil
 }
 
-// BackfillDataInTxn will backfill table index in a transaction. A lock corresponds to a rowKey if the value of rowKey is changed,
-// Note that index columns values may change, and an index is not allowed to be added, so the txn will rollback and retry.
-// BackfillDataInTxn will add w.batchCnt indices once, default value of w.batchCnt is 128.
 func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskCtx backfillTaskContext, errInTxn error) {
 	failpoint.Inject("errorMockPanic", func(val failpoint.Value) {
 		if val.(bool) {
@@ -1357,6 +1395,64 @@ func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskC
 	logSlowOperations(time.Since(oprStartTime), "AddIndexBackfillDataInTxn", 3000)
 
 	return
+}
+
+// BackfillDataInTxn will backfill table index in a transaction. A lock corresponds to a rowKey if the value of rowKey is changed,
+// Note that index columns values may change, and an index is not allowed to be added, so the txn will rollback and retry.
+// BackfillDataInTxn will add w.batchCnt indices once, default value of w.batchCnt is 128.
+func (w *addIndexWorker) backfillData(handleRange reorgBackfillTask) (taskCtx backfillTaskContext, errInTxn error) {
+	if w.cache == nil {
+		wc := addindex.NewWorkerKVCache()
+		w.cache = &wc
+	}
+	oprStartTime := time.Now()
+
+	txn, err := w.sessCtx.GetStore().Begin()
+	if err != nil {
+		return taskCtx, errors.Trace(err)
+	}
+
+	taskCtx.addedCount = 0
+	taskCtx.scanCount = 0
+	txn.SetOption(kv.Priority, w.priority)
+
+	idxRecords, nextKey, taskDone, err := w.fetchRowColVals(txn, handleRange)
+	if err != nil {
+		return taskCtx, errors.Trace(err)
+	}
+	taskCtx.nextKey = nextKey
+	taskCtx.done = taskDone
+
+	for _, idxRecord := range idxRecords {
+		taskCtx.scanCount++
+		// The index is already exists, we skip it, no needs to backfill it.
+		// The following update, delete, insert on these rows, TiDB can handle it correctly.
+		if idxRecord.skip {
+			continue
+		}
+
+		// Create the index.
+		handle, err := w.index.Create(w.sessCtx, txn, idxRecord.vals, idxRecord.handle, idxRecord.rsData)
+		if err != nil {
+			if (kv.ErrKeyExists.Equal(err) || strings.Contains(err.Error(), strconv.FormatInt(mysql.ErrDupEntry, 10))) && idxRecord.handle.Equal(handle) {
+				// Index already exists, skip it.
+				continue
+			}
+
+			return taskCtx, errors.Trace(err)
+		}
+		taskCtx.addedCount++
+	}
+
+	// log.L().Info("[debug-fetch] finish idxRecord info", zap.Int("scanCount", taskCtx.scanCount), zap.Int("addedCount", taskCtx.addedCount))
+	errInTxn = addindex.FlushKeyValSync(context.TODO(), 0, w.cache)
+	if errInTxn != nil {
+		addindex.LogError("FlushKeyValSync %d paris err: %v.", len(w.cache.Fetch()), errInTxn.Error())
+	}
+	// sst.LogInfo("handleRange=%s(%s -> %s); %x -> %x.",
+	// 	handleRange.String(), handleRange.startKey, handleRange.endKey, minKey, maxKey)
+	logSlowOperations(time.Since(oprStartTime), fmt.Sprintf("AddIndexBackfillData（%d,%d)", len(idxRecords), len(w.cache.Fetch())), 3000)
+	return taskCtx, errors.Trace(errInTxn)
 }
 
 func (w *worker) addPhysicalTableIndex(t table.PhysicalTable, indexInfo *model.IndexInfo, reorgInfo *reorgInfo) error {

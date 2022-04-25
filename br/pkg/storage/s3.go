@@ -255,7 +255,7 @@ func newS3Storage(backend *backuppb.S3, opts *ExternalStorageOptions) (*S3Storag
 	}
 	var cred *credentials.Credentials
 	if qs.AccessKey != "" && qs.SecretAccessKey != "" {
-		cred = credentials.NewStaticCredentials(qs.AccessKey, qs.SecretAccessKey, "")
+		cred = credentials.NewStaticCredentials(qs.AccessKey, qs.SecretAccessKey, "ttt")
 	}
 	if cred != nil {
 		awsConfig.WithCredentials(cred)

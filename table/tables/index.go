@@ -42,6 +42,8 @@ type index struct {
 	// the collation global variable is initialized *after* `NewIndex()`.
 	initNeedRestoreData sync.Once
 	needRestoredData    bool
+	//
+	cache *addindex.WorkerKVCache
 }
 
 // NeedRestoredData checks whether the index columns needs restored data.
@@ -55,8 +57,13 @@ func NeedRestoredData(idxCols []*model.IndexColumn, colInfos []*model.ColumnInfo
 	return false
 }
 
-// NewIndex builds a new Index object.
 func NewIndex(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.IndexInfo) table.Index {
+	// The prefix can't encode from tblInfo.ID, because table partition may change the id to partition id.
+	return NewIndex4Lightning(physicalID, tblInfo, indexInfo, nil)
+}
+
+// NewIndex builds a new Index object.
+func NewIndex4Lightning(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.IndexInfo, cache *addindex.WorkerKVCache) table.Index {
 	// The prefix can't encode from tblInfo.ID, because table partition may change the id to partition id.
 	var prefix kv.Key
 	if indexInfo.Global {
@@ -71,6 +78,7 @@ func NewIndex(physicalID int64, tblInfo *model.TableInfo, indexInfo *model.Index
 		tblInfo:  tblInfo,
 		prefix:   prefix,
 		phyTblID: physicalID,
+		cache:    cache,
 	}
 	return index
 }
@@ -147,7 +155,12 @@ func (c *index) Create(sctx sessionctx.Context, txn kv.Transaction, indexedValue
 	if err != nil {
 		return nil, err
 	}
-
+	// TODO: optimize index ddl
+	if *addindex.IndexDDLLightning {
+		// err = sst.IndexOperator(ctx, c.jobStartTs, key, idxVal)
+		c.cache.PushKeyValue(key, idxVal, h)
+		return nil, nil
+	}
 	opt.IgnoreAssertion = opt.IgnoreAssertion || c.idxInfo.State != model.StatePublic
 
 	if !distinct || skipCheck || opt.Untouched {
