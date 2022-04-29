@@ -16,7 +16,6 @@ package ddl
 
 import (
 	"context"
-	"github.com/pingcap/tidb/ddl/addindex"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -595,6 +594,21 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		return false, ver, errors.Trace(err)
 	}
 
+	// Check and set up lightning Backend.
+	if isAllowFastDDL(reorgInfo.d.store) {
+		// init the flag, set IsLightningOk to false first.
+		reorgInfo.IsLightningOk = false
+		tblInfo, err := GetTableInfoAndCancelFaultJob(t, job, job.SchemaID)
+		// If get tblInfo failed, go back to kernel backfill process.
+		if err == nil {
+			err = prepareLightningEnv(w.ctx, indexInfo.Unique, job, t, tblInfo, true)
+			// Once Env is created well, set IsLightningOk to true.
+			if err == nil {
+				reorgInfo.IsLightningOk = true
+			}
+		}
+	}
+
 	err = w.runReorgJob(t, reorgInfo, tbl.Meta(), d.lease, func() (addIndexErr error) {
 		defer util.Recover(metrics.LabelDDL, "onCreateIndex",
 			func() {
@@ -616,10 +630,18 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		}
 		// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
 		w.reorgCtx.cleanNotifyReorgCancel()
+
 		return false, ver, errors.Trace(err)
 	}
+	// Flush data to TiKV
+	importIndexDataToStore(w.ctx, reorgInfo, indexInfo.Unique, tbl)
+
 	// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
 	w.reorgCtx.cleanNotifyReorgCancel()
+
+	// Cleanup lightning environment
+	cleanUpLightningEnv(reorgInfo)
+
 	return true, ver, errors.Trace(err)
 }
 
@@ -1631,9 +1653,4 @@ func findIndexesByColName(indexes []*model.IndexInfo, colName string) ([]*model.
 		}
 	}
 	return idxInfos, offsets
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	addindex.IndexCycleReference()
 }

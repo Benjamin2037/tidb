@@ -18,7 +18,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/pingcap/tidb/ddl/addindex"
 	"io/fs"
 	"os"
 	"runtime"
@@ -34,6 +33,7 @@ import (
 	"github.com/pingcap/tidb/bindinfo"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl"
+	"github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/executor"
 	"github.com/pingcap/tidb/kv"
@@ -201,6 +201,7 @@ func main() {
 	printInfo()
 	setupBinlogClient()
 	setupMetrics()
+	lightning.InitGolbalLightningBackendEnv()
 
 	storage, dom := createStoreAndDomain()
 	svr := createServer(storage, dom)
@@ -800,10 +801,4 @@ func stringToList(repairString string) []string {
 	return strings.FieldsFunc(repairString, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '"'
 	})
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	// ref here because will init the config.
-	addindex.IndexCycleReference()
 }
