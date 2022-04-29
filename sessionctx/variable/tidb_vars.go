@@ -668,6 +668,8 @@ const (
 	TiDBMemQuotaBindingCache = "tidb_mem_quota_binding_cache"
 	// TiDBRCReadCheckTS indicates the tso optimization for read-consistency read is enabled.
 	TiDBRCReadCheckTS = "tidb_rc_read_check_ts"
+	// TiDBFastDDL indicates whether use lighting to help acceleate adding index stmt.
+	TiDBFastDDL = "tidb_fast_ddl"
 )
 
 // TiDB intentional limits
@@ -841,6 +843,7 @@ const (
 	DefMaxAllowedPacket                   uint64 = 67108864
 	DefTiDBMemQuotaQuery                         = 1073741824 // 1GB
 	DefTiDBQueryLogMaxLen                        = 4096
+	DefTiDBFastDDL                               = false
 )
 
 // Process global variables.
