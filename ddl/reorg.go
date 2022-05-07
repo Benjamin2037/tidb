@@ -401,7 +401,7 @@ type reorgInfo struct {
 	currElement     *meta.Element
 
 	// Mark whether the lightning execution environment is built or not
-	IsLightningOk bool
+	IsLightningEnabled bool
 }
 
 func (r *reorgInfo) String() string {
@@ -410,7 +410,8 @@ func (r *reorgInfo) String() string {
 		"StartHandle:" + tryDecodeToHandleString(r.StartKey) + "," +
 		"EndHandle:" + tryDecodeToHandleString(r.EndKey) + "," +
 		"First:" + strconv.FormatBool(r.first) + "," +
-		"PhysicalTableID:" + strconv.FormatInt(r.PhysicalTableID, 10)
+		"PhysicalTableID:" + strconv.FormatInt(r.PhysicalTableID, 10) + "," +
+		"Lightning execution:" + strconv.FormatBool(r.IsLightningEnabled)
 }
 
 func constructDescTableScanPB(physicalTableID int64, tblInfo *model.TableInfo, handleCols []*model.ColumnInfo) *tipb.Executor {
