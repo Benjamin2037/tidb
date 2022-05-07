@@ -87,8 +87,8 @@ func genEngineInfoKey(jobId int64, workerId int64) string {
 }
 
 func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, tbl table.Table) error {
-	keyEngineInfo := genEngineInfoKey(reorg.ID, 0)
-	if isAllowFastDDL(reorg.d.store) && reorg.IsLightningOk == false {
+	if reorg.IsLightningEnabled {
+		keyEngineInfo := genEngineInfoKey(reorg.ID, 0)
 		// just log info.
 		err := lit.FinishIndexOp(ctx, keyEngineInfo, tbl, unique)
 		if err != nil {
@@ -100,10 +100,12 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 }
 
 func cleanUpLightningEnv(reorg *reorgInfo) {
-	if isAllowFastDDL(reorg.d.store) && reorg.IsLightningOk == false {
+	if reorg.IsLightningEnabled {
 		// Close backend
 		keyBackend := genBackendContextKey(reorg.ID)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(keyBackend, false)
+		// at last
+		reorg.IsLightningEnabled = false
 	}
 }
 

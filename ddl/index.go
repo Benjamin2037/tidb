@@ -595,17 +595,20 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		return false, ver, errors.Trace(err)
 	}
 
-	// Check and set up lightning Backend.
+	// Check and set up lightning Backend. Whether use lightning add index will depends on
+	// TiDBFastDDL sysvars is true or false. If it is set to true, then the lightning execution
+	// environment will be set up and then use reorgInfo.IsLightningok to show whether the lightning
+	// backfill used for specfic ddl job.
 	if isAllowFastDDL(reorgInfo.d.store) {
 		// init the flag, set IsLightningOk to false first.
-		reorgInfo.IsLightningOk = false
+		reorgInfo.IsLightningEnabled = false
 		tblInfo, err := GetTableInfoAndCancelFaultJob(t, job, job.SchemaID)
 		// If get tblInfo failed, go back to kernel backfill process.
 		if err == nil {
 			err = prepareLightningEnv(w.ctx, indexInfo.Unique, job, t, tblInfo, true)
 			// Once Env is created well, set IsLightningOk to true.
 			if err == nil {
-				reorgInfo.IsLightningOk = true
+				reorgInfo.IsLightningEnabled = true
 			}
 		}
 	}
