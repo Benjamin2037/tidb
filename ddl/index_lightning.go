@@ -24,7 +24,9 @@ import (
 // isAllowFastDDL is used to
 func isAllowFastDDL(storage kv.Storage) bool {
 	sessCtx := newContext(storage)
-	if sessCtx.GetSessionVars().TiDBFastDDL {
+	// Only when both TiDBFastDDL is set to on and Lightning env is inited successful,
+	// the add index could choose lightning path to do backfill procedure.   
+	if sessCtx.GetSessionVars().TiDBFastDDL && lit.GlobalLightningEnv.IsInited {
 		return true
 	} else {
 		return false
