@@ -32,9 +32,18 @@ const (
 	_gb             = 1024 * _mb
 	flush_size      = 8 * _mb
 	RegionSizeStats = "RegionSizeStats"
-	maxMemLimation  = 128 * _gb
+	maxMemLimation  = 10 * _gb
 )
 
+var defaultImportantVariables = map[string]string{
+	"max_allowed_packet":      "67108864",
+	"div_precision_increment": "4",
+	"time_zone":               "SYSTEM",
+	"lc_time_names":           "en_US",
+	"default_week_format":     "0",
+	"block_encryption_mode":   "aes-128-ecb",
+	"group_concat_max_len":    "1024",
+}
 type ClusterInfo struct {
 	PdAddr string
 	// TidbHost string - 127.0.0.1
@@ -46,7 +55,7 @@ type LightningEnv struct {
 	ClusterInfo
 	SortPath      string
 	LitMemRoot    LightningMemoryRoot
-	BackendCache  *BackendCache
+	BackendCache  map[string]*BackendContext
 	EngineManager *EngineManager
 	diskQuota     int64
 	IsInited      bool
@@ -60,14 +69,14 @@ func init() {
 	var rLimit syscall.Rlimit
 	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
-		logutil.BgLogger().Warn("Lightning: GetSystemRLimit err:", zap.String("OS error:", err.Error()), zap.String("Default: ", "1024."))
+		logutil.BgLogger().Warn(LERR_GET_SYS_LIMIT_ERR, zap.String("OS error:", err.Error()), zap.String("Default: ", "1024."))
 	} else {
 		GlobalLightningEnv.limit = int64(rLimit.Cur)
 	}
 	GlobalLightningEnv.IsInited = false
 }
 
-func InitGolbalLightningBackendEnv() (err error) {
+func InitGolbalLightningBackendEnv() {
 	cfg := tidbcfg.GetGlobalConfig()
 	GlobalLightningEnv.PdAddr = cfg.AdvertiseAddress
 	GlobalLightningEnv.Port = cfg.Port
@@ -75,7 +84,7 @@ func InitGolbalLightningBackendEnv() (err error) {
 	if err := GlobalLightningEnv.initSortPath(); err != nil {
 		GlobalLightningEnv.IsInited = false
 		log.L().Warn(LWAR_ENV_INIT_FAILD, zap.String("Os error", err.Error()))
-		return err
+		return
 	}
 	if GlobalLightningEnv.IsInited {
 		GlobalLightningEnv.parseDiskQuota()
@@ -85,7 +94,7 @@ func InitGolbalLightningBackendEnv() (err error) {
 	log.SetAppLogger(logutil.BgLogger())
 	log.L().Info(LInfo_ENV_INIT_SUCC)
 	GlobalLightningEnv.IsInited = true
-	return nil
+	return
 }
 
 func (l *LightningEnv) parseDiskQuota() {
@@ -117,7 +126,6 @@ func (l *LightningEnv) initSortPath() error {
 	}
 	return nil
 }
-
 
 // Generate lightning path in TiDB datadir. 
 func GenLightningDataDir() string {
