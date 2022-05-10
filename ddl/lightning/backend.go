@@ -73,7 +73,7 @@ func createLocalBackend(ctx context.Context, unique bool) (backend.Backend, erro
 	return local.NewLocalBackend(ctx, tls, cfg, nil, int(GlobalLightningEnv.limit), nil)
 }
 
-func CloseBackend(key string) error {
-	err := GlobalLightningEnv.LitMemRoot.DeleteBackendContext(key, false)
-	return err
+func CloseBackend(bcKey string) {
+	GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
+	return
 }

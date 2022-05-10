@@ -22,17 +22,19 @@ func (wcc *WorkerContextCache) init() {
 }
 
 type WorkerContext struct {
-	WorkerId int
-	Ei       *engineInfo
-	KVCache  []*WorkerKVCache
+	WorkerId    int
+	Ei          *engineInfo
+	KVCache     []*WorkerKVCache
+	CacheCount  int
 }
 
 func (wc *WorkerContext) init(id int, ei *engineInfo, cacheCount int) {
 	wc.WorkerId = id
 	wc.Ei = ei
 	wc.KVCache = make([]*WorkerKVCache, cacheCount)
-	var i int = 0
+	wc.CacheCount = cacheCount
 
+	i := 0
 	for _, k := range wc.KVCache {
 		k = NewWorkerKVCache()
 		wc.KVCache[i] = k

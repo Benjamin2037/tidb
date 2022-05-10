@@ -10,7 +10,6 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
 	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
-	"github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/parser/model"
@@ -26,27 +25,21 @@ import (
 type engineInfo struct {
 	Id           int32
 	key          string
-	backend      *backend.Backend
+	BackCtx      *BackendContext
 	OpenedEngine *backend.OpenedEngine
 	writer       *backend.LocalEngineWriter
 	cfg          *backend.EngineConfig
 	// TODO: use channel later;
 	ref      int32
-	kvs      []common.KvPair
 	tbl      *model.TableInfo
 	isOpened bool
 	//exec     *sessionPool
 }
 
-func (ei *engineInfo) ResetCache() {
-	ei.kvs = ei.kvs[:0]
-	// ei.size = 0
-}
-
-func (ei *engineInfo) Init(key string, cfg *backend.EngineConfig, be *backend.Backend, en *backend.OpenedEngine, tbl *model.TableInfo) {
+func (ei *engineInfo) Init(key string, cfg *backend.EngineConfig, bCtx *BackendContext, en *backend.OpenedEngine, tbl *model.TableInfo) {
 	ei.key = key
 	ei.cfg = cfg
-	ei.backend = be
+	ei.BackCtx = bCtx
 	ei.OpenedEngine = en
 	ei.tbl = tbl
 	ei.isOpened = false
@@ -79,7 +72,7 @@ func (ei *engineInfo) unsafeImportAndReset(ctx context.Context) error {
 		return fmt.Errorf("FinishIndexOp err:%w", err)
 	}
 
-	if err = ei.backend.FlushAll(ctx); err != nil {
+	if err = ei.BackCtx.Backend.FlushAll(ctx); err != nil {
 		//LogError("flush engine for disk quota failed, check again later : %v", err)
 		return err
 	}
@@ -89,7 +82,7 @@ func (ei *engineInfo) unsafeImportAndReset(ctx context.Context) error {
 	}
 	ctx = context.WithValue(ctx, RegionSizeStats, ret)
 	_, uuid := backend.MakeUUID(ei.tbl.Name.String(), ei.Id)
-	return ei.backend.UnsafeImportAndReset(ctx, uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
+	return ei.BackCtx.Backend.UnsafeImportAndReset(ctx, uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
 }
 
 func GenEngineKey(schemaId int64, tableId int64, indexId int64) string {
@@ -131,7 +124,7 @@ func CreateEngine(ctx context.Context, job *model.Job, t *meta.Meta, backendKey 
 	if err != nil {
 		return errors.Errorf("PrepareIndexOp.OpenEngine err:%v", err)
 	}
-	ei.Init(engineKey, &cfg, be, en, tblInfo)
+	ei.Init(engineKey, &cfg, bc, en, tblInfo)
 	GlobalLightningEnv.EngineManager.engineCache[engineKey] = ei
 	bc.EngineCache[engineKey] = ei
 
@@ -275,7 +268,7 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 		return errors.New("engine.Cleanup err")
 	}
 	if unique {
-		hasDupe, err := ei.backend.CollectRemoteDuplicateRows(ctx, tbl, ei.tbl.Name.O, &kv.SessionOptions{
+		hasDupe, err := ei.BackCtx.Backend.CollectRemoteDuplicateRows(ctx, tbl, ei.tbl.Name.O, &kv.SessionOptions{
 			SQLMode: mysql.ModeStrictAllTables,
 			SysVars: defaultImportantVariables,
 		})

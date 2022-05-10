@@ -14,6 +14,7 @@ const (
 	
 	// Warning message    
 	LWAR_ENV_INIT_FAILD        string = "Lightning: initialize environment failed"
+	LWAR_BACKEND_NOT_EXIST     string = "Lightning: backend not exist"
 
 	// Info message
 	LInfo_ENV_INIT_SUCC        string = "Lightning: Init global lightning backend environment finished."

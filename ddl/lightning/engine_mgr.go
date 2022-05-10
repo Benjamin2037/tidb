@@ -45,5 +45,9 @@ func (em *EngineManager) GetWriter(key string) (*backend.LocalEngineWriter, erro
 }
 
 func (em *EngineManager) ReleaseEngine(key string) {
-	delete(em.engineCache, key)
+	ei, exist := em.engineCache[key]
+	if !exist {
+		return
+	}
+	ei.isOpened = false
 }
