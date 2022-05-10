@@ -642,8 +642,8 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 
 			switch bfWorkerType {
 			case typeAddIndexWorker:
-				// Firstly, check and go lightning pass
-				if isAllowFastDDL(reorgInfo.d.store) && reorgInfo.IsLightningOk {
+				// Firstly, check and try lightning path
+				if reorgInfo.IsLightningEnabled {
 					idxWorker, err := newAddIndexWorkerLit(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode, job.ID)
 					if err == nil {
 						idxWorker.priority = job.Priority
@@ -652,7 +652,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 					}
 				}
 
-				// If there is any problem for lightning pass, then go back to kernel pass.
+				// If there is any problem for lightning pass, then go back to kernel path.
 				if err != nil {
 					idxWorker := newAddIndexWorker(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode)
 					idxWorker.priority = job.Priority
