@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package lightning
 
 import (
@@ -12,16 +25,6 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/util/logutil"
 )
-
-type BackendCache struct {
-	bcCache    map[string]*BackendContext
-	backendNum int
-}
-
-func (bca *BackendCache) init() {
-	bca.bcCache = make(map[string]*BackendContext)
-	bca.backendNum = 0
-}
 
 type BackendContext struct {
 	Key         string // Currently, backend key used ddl job id string
@@ -73,7 +76,7 @@ func createLocalBackend(ctx context.Context, unique bool) (backend.Backend, erro
 	return local.NewLocalBackend(ctx, tls, cfg, nil, int(GlobalLightningEnv.limit), nil)
 }
 
-func CloseBackend(key string) error {
-	err := GlobalLightningEnv.LitMemRoot.DeleteBackendContext(key, false)
-	return err
+func CloseBackend(bcKey string) {
+	GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
+	return
 }

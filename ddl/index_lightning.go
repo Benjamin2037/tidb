@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package ddl
 
 import (
@@ -50,8 +63,7 @@ func prepareLightningContext(workId int, keyEngine string, kvCount int) (*lit.Wo
 	wctx, err := lit.GlobalLightningEnv.LitMemRoot.RegistWorkerContext(workId, keyEngine, kvCount)
 	if err != nil {
 		err = errors.New(lit.LERR_CREATE_CONTEX_FAILED)
-		lit.GlobalLightningEnv.LitMemRoot.ReleaseKVCache(keyEngine + strconv.FormatUint(uint64(workId), 10))
-		return wctx, err
+		return nil, err
 	}
 	return wctx, err
 }
@@ -62,7 +74,7 @@ func prepareBackend(ctx context.Context, unique bool, job *model.Job) (err error
 	err = lit.GlobalLightningEnv.LitMemRoot.RegistBackendContext(ctx, unique, bcKey)
 	if err != nil {
 		err = errors.New(lit.LERR_CREATE_BACKEND_FAILED)
-		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey, false)
+		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 		return err
 	}
 
@@ -72,10 +84,10 @@ func prepareBackend(ctx context.Context, unique bool, job *model.Job) (err error
 func prepareLightningEngine(job *model.Job, t *meta.Meta, workerId int64, tbl *model.TableInfo) (err error) {
 	bcKey := genBackendContextKey(job.ID)
 	enginKey := genEngineInfoKey(job.ID, workerId)
-	_, err = lit.GlobalLightningEnv.LitMemRoot.RegistEngineInfo(job, t, bcKey, enginKey, tbl)
+	err = lit.GlobalLightningEnv.LitMemRoot.RegistEngineInfo(job, t, bcKey, enginKey, tbl)
 	if err != nil {
 		err = errors.New(lit.LERR_CREATE_ENGINE_FAILED)
-		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey, true)
+		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	}
 	return err
 }
@@ -104,8 +116,8 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 func cleanUpLightningEnv(reorg *reorgInfo) {
 	if reorg.IsLightningEnabled {
 		// Close backend
-		keyBackend := genBackendContextKey(reorg.ID)
-		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(keyBackend, false)
+		bcKey := genBackendContextKey(reorg.ID)
+		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 		// at last
 		reorg.IsLightningEnabled = false
 	}
