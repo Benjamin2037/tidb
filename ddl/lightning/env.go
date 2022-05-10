@@ -74,7 +74,7 @@ func InitGolbalLightningBackendEnv() (err error) {
 	GlobalLightningEnv.Status = cfg.Status.StatusPort
 	if err := GlobalLightningEnv.initSortPath(); err != nil {
 		GlobalLightningEnv.IsInited = false
-		log.L().Warn("Lightning init failed: ", zap.String("Os error", err.Error()))
+		log.L().Warn(LWAR_ENV_INIT_FAILD, zap.String("Os error", err.Error()))
 		return err
 	}
 	if GlobalLightningEnv.IsInited {
@@ -83,7 +83,7 @@ func InitGolbalLightningBackendEnv() (err error) {
 	// Todo need to set Memory limitation, temp set to 128 G
 	GlobalLightningEnv.LitMemRoot.init(maxMemLimation)
 	log.SetAppLogger(logutil.BgLogger())
-	log.L().Info("Lightning: Init global lightning backend environment finished.")
+	log.L().Info(LInfo_ENV_INIT_SUCC)
 	GlobalLightningEnv.IsInited = true
 	return nil
 }
@@ -91,8 +91,7 @@ func InitGolbalLightningBackendEnv() (err error) {
 func (l *LightningEnv) parseDiskQuota() {
 	sz, err := lcom.GetStorageSize(l.SortPath)
 	if err != nil {
-		log.L().Warn("Lightning: GetStorageSize err:", zap.String("Os error:", err.Error()), zap.String("default size", "10G"))
-		l.diskQuota = 10 * _gb
+		log.L().Warn(LERR_GET_STORAGE_QUOTA, zap.String("Os error:", err.Error()), zap.String("default size", "10G"))
 		return
 	}
 	l.diskQuota = int64(sz.Available)
