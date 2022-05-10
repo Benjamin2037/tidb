@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package lightning
 
 import (
@@ -10,7 +23,6 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
 	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
-	"github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/parser/model"
@@ -22,31 +34,23 @@ import (
 	"github.com/twmb/murmur3"
 	"go.uber.org/zap"
 )
-
 type engineInfo struct {
 	Id           int32
 	key          string
-	backend      *backend.Backend
+	BackCtx      *BackendContext
 	OpenedEngine *backend.OpenedEngine
 	writer       *backend.LocalEngineWriter
 	cfg          *backend.EngineConfig
 	// TODO: use channel later;
 	ref      int32
-	kvs      []common.KvPair
 	tbl      *model.TableInfo
 	isOpened bool
-	//exec     *sessionPool
 }
 
-func (ei *engineInfo) ResetCache() {
-	ei.kvs = ei.kvs[:0]
-	// ei.size = 0
-}
-
-func (ei *engineInfo) Init(key string, cfg *backend.EngineConfig, be *backend.Backend, en *backend.OpenedEngine, tbl *model.TableInfo) {
+func (ei *engineInfo) Init(key string, cfg *backend.EngineConfig, bCtx *BackendContext, en *backend.OpenedEngine, tbl *model.TableInfo) {
 	ei.key = key
 	ei.cfg = cfg
-	ei.backend = be
+	ei.BackCtx = bCtx
 	ei.OpenedEngine = en
 	ei.tbl = tbl
 	ei.isOpened = false
@@ -79,7 +83,7 @@ func (ei *engineInfo) unsafeImportAndReset(ctx context.Context) error {
 		return fmt.Errorf("FinishIndexOp err:%w", err)
 	}
 
-	if err = ei.backend.FlushAll(ctx); err != nil {
+	if err = ei.BackCtx.Backend.FlushAll(ctx); err != nil {
 		//LogError("flush engine for disk quota failed, check again later : %v", err)
 		return err
 	}
@@ -89,7 +93,7 @@ func (ei *engineInfo) unsafeImportAndReset(ctx context.Context) error {
 	}
 	ctx = context.WithValue(ctx, RegionSizeStats, ret)
 	_, uuid := backend.MakeUUID(ei.tbl.Name.String(), ei.Id)
-	return ei.backend.UnsafeImportAndReset(ctx, uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
+	return ei.BackCtx.Backend.UnsafeImportAndReset(ctx, uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
 }
 
 func GenEngineKey(schemaId int64, tableId int64, indexId int64) string {
@@ -124,14 +128,14 @@ func CreateEngine(ctx context.Context, job *model.Job, t *meta.Meta, backendKey 
 	h.Write(b[:])
 	eid := int32(h.Sum32())
 
-	bc := GlobalLightningEnv.BackendCache.bcCache[backendKey]
+	bc := GlobalLightningEnv.BackendCache[backendKey]
 	be := bc.Backend
 
 	en, err := be.OpenEngine(ctx, &cfg, job.TableName, eid)
 	if err != nil {
 		return errors.Errorf("PrepareIndexOp.OpenEngine err:%v", err)
 	}
-	ei.Init(engineKey, &cfg, be, en, tblInfo)
+	ei.Init(engineKey, &cfg, bc, en, tblInfo)
 	GlobalLightningEnv.EngineManager.engineCache[engineKey] = ei
 	bc.EngineCache[engineKey] = ei
 
@@ -156,7 +160,7 @@ func FlushKeyValSync(ctx context.Context, keyEngineInfo string, cache *WorkerKVC
 	err = ei.unsafeImportAndReset(ctx)
 	if err != nil {
 		// LogError("unsafeImportAndReset %s cost %v", size2str(sn.szInc.encodeSize), time.Now().Sub(start))
-		// 仅仅是导入失败，下次还是可以继续导入，不影响.
+		// Only import failed, next time can import continue.
 		return nil
 	}
 	sn.importAndReset(start)
@@ -229,7 +233,7 @@ func fetchTableRegionSizeStats(tblId int64, exec sqlexec.RestrictedSQLExecutor) 
 	return ret, nil
 }
 
-// TODO: 如果多个 线程 同时调用该函数，是否存在这样情况? 如果存在，该怎么处理?
+// TODO: If multi thread call this function, how to handle this logic?
 func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, unique bool) (err error) {
 	ei, err := GlobalLightningEnv.EngineManager.GetEngineInfo(keyEngineInfo)
 	if err != nil {
@@ -275,7 +279,7 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 		return errors.New("engine.Cleanup err")
 	}
 	if unique {
-		hasDupe, err := ei.backend.CollectRemoteDuplicateRows(ctx, tbl, ei.tbl.Name.O, &kv.SessionOptions{
+		hasDupe, err := ei.BackCtx.Backend.CollectRemoteDuplicateRows(ctx, tbl, ei.tbl.Name.O, &kv.SessionOptions{
 			SQLMode: mysql.ModeStrictAllTables,
 			SysVars: defaultImportantVariables,
 		})
@@ -290,14 +294,4 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 	GlobalLightningEnv.EngineManager.ReleaseRef(keyEngineInfo)
 	GlobalLightningEnv.EngineManager.ReleaseEngine(keyEngineInfo)
 	return nil
-}
-
-var defaultImportantVariables = map[string]string{
-	"max_allowed_packet":      "67108864",
-	"div_precision_increment": "4",
-	"time_zone":               "SYSTEM",
-	"lc_time_names":           "en_US",
-	"default_week_format":     "0",
-	"block_encryption_mode":   "aes-128-ecb",
-	"group_concat_max_len":    "1024",
 }
