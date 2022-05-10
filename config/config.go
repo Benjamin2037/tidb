@@ -248,6 +248,8 @@ type Config struct {
 	MaxBallastObjectSize int `toml:"max-ballast-object-size" json:"max-ballast-object-size"`
 	// BallastObjectSize set the initial size of the ballast object, the unit is byte.
 	BallastObjectSize int `toml:"ballast-object-size" json:"ballast-object-size"`
+	// LightningSortPath used to specific the lighting DDL local sort path.
+	LightningSortPath string `toml:"lightning-sort-path" json:"lightning-sort-path"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed

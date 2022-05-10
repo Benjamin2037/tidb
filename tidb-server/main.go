@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/tidb/bindinfo"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl"
+	"github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/executor"
 	"github.com/pingcap/tidb/kv"
@@ -201,6 +202,7 @@ func main() {
 	printInfo()
 	setupBinlogClient()
 	setupMetrics()
+	lightning.InitGolbalLightningBackendEnv()
 
 	storage, dom := createStoreAndDomain()
 	svr := createServer(storage, dom)

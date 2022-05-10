@@ -642,10 +642,23 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 
 			switch bfWorkerType {
 			case typeAddIndexWorker:
-				idxWorker := newAddIndexWorker(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode)
-				idxWorker.priority = job.Priority
-				backfillWorkers = append(backfillWorkers, idxWorker.backfillWorker)
-				go idxWorker.backfillWorker.run(reorgInfo.d, idxWorker, job)
+				// Firstly, check and go lightning pass
+				if isAllowFastDDL(reorgInfo.d.store) && reorgInfo.IsLightningOk {
+					idxWorker, err := newAddIndexWorkerLit(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode, job.ID)
+					if err == nil {
+						idxWorker.priority = job.Priority
+						backfillWorkers = append(backfillWorkers, idxWorker.backfillWorker)
+						go idxWorker.backfillWorker.run(reorgInfo.d, idxWorker, job)
+					}
+				}
+
+				// If there is any problem for lightning pass, then go back to kernel pass.
+				if err != nil {
+					idxWorker := newAddIndexWorker(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode)
+					idxWorker.priority = job.Priority
+					backfillWorkers = append(backfillWorkers, idxWorker.backfillWorker)
+					go idxWorker.backfillWorker.run(reorgInfo.d, idxWorker, job)
+				}
 			case typeUpdateColumnWorker:
 				// Setting InCreateOrAlterStmt tells the difference between SELECT casting and ALTER COLUMN casting.
 				sessCtx.GetSessionVars().StmtCtx.InCreateOrAlterStmt = true

@@ -143,6 +143,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.11 // indirect
+	github.com/kisielk/godepgraph v0.0.0-20190626013829-57a7e4a651a9 // indirect
 	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/kr/pretty v0.3.0 // indirect

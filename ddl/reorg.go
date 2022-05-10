@@ -238,6 +238,9 @@ func (w *worker) runReorgJob(t *meta.Meta, reorgInfo *reorgInfo, tblInfo *model.
 		waitTimeout = ReorgWaitTimeout
 	}
 
+	// ToDo: Bear init Lightning openengine if there is need to open multi openengine for index backfill.
+	// Init lightning job meta.
+
 	// wait reorganization job done or timeout
 	select {
 	case err := <-w.reorgCtx.doneCh:
@@ -292,6 +295,7 @@ func (w *worker) runReorgJob(t *meta.Meta, reorgInfo *reorgInfo, tblInfo *model.
 		// Update a reorgInfo's handle.
 		// Since daemon-worker is triggered by timer to store the info half-way.
 		// you should keep these infos is read-only (like job) / atomic (like doneKey & element) / concurrent safe.
+		// Todo: Bear, need update and store lightning related runtime status into meta.
 		err := t.UpdateDDLReorgStartHandle(job, currentElement, doneKey)
 
 		logutil.BgLogger().Info("[ddl] run reorg job wait timeout",
@@ -395,6 +399,9 @@ type reorgInfo struct {
 	PhysicalTableID int64
 	elements        []*meta.Element
 	currElement     *meta.Element
+
+	// Mark whether the lightning execution environment is built or not
+	IsLightningOk bool
 }
 
 func (r *reorgInfo) String() string {
