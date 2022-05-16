@@ -24,11 +24,27 @@ const (
 	LERR_GET_ENGINE_FAILED     string = "Lightning: Use key get engininfo failed."
 	LERR_GET_STORAGE_QUOTA     string = "Lightning: Get storage quota err:"
 	LERR_GET_SYS_LIMIT_ERR     string = "Lightning: GetSystemRLimit err:"
-	
+	LERR_CLOSE_ENGINE_ERR      string = "Lightning: Close engine err:"
+	LERR_INGEST_DATA_ERR       string = "Lightning: Ingest data into TiKV err:"
+	LERR_LOCAL_DUP_CHECK_ERR   string = "Lightning: Locale duplicate check err:"
+	LERR_LOCAL_DUP_EXIST_ERR   string = "Lightning: Locale duplicate index key exist:"
+	LERR_REMOTE_DUP_CHECK_ERR  string = "Lightning: Remote duplicate check err:"
+	LERR_REMOTE_DUP_EXIST_ERR  string = "Lightning: Remote duplicate index key exist::"
+
 	// Warning message    
 	LWAR_ENV_INIT_FAILD        string = "Lightning: initialize environment failed"
 	LWAR_BACKEND_NOT_EXIST     string = "Lightning: backend not exist"
-
+	LWAR_CONFIG_ERROR          string = "Lightning: build config for backend failed"
+	
 	// Info message
 	LInfo_ENV_INIT_SUCC        string = "Lightning: Init global lightning backend environment finished."
+	LINFO_CREATE_BACKEND       string = "Lightning: Create one backend for job."
+	LINFO_OPEN_ENGINE          string = "Lightning: Open one engine for index reorg"
+	LINFO_CREATE_WRITER        string = "Lightning: Create one local Writer for Index reorg task"
+	LINFO_CLOSE_ENGINE         string = "Lightning: Flush all writer and get closed engine"
+	LINFO_LOCAL_DUPL_CHECK     string = "Lightning: Start Local duplicate check"
+	LINFO_REMOTE_DUPL_CHECK    string = "Lightning: Start remote duplicate check"
+	LINFO_START_TO_IMPORT      string = "Lightning: Start to import data"
+
+
 )

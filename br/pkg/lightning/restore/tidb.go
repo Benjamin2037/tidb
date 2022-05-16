@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"github.com/pingcap/tidb/br/pkg/lightning/metric"
 	"github.com/pingcap/tidb/br/pkg/lightning/mydump"
+	lit "github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/format"
@@ -39,85 +40,13 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-// defaultImportantVariables is used in ObtainImportantVariables to retrieve the system
-// variables from downstream which may affect KV encode result. The values record the default
-// values if missing.
-var defaultImportantVariables = map[string]string{
-	"max_allowed_packet":      "67108864",
-	"div_precision_increment": "4",
-	"time_zone":               "SYSTEM",
-	"lc_time_names":           "en_US",
-	"default_week_format":     "0",
-	"block_encryption_mode":   "aes-128-ecb",
-	"group_concat_max_len":    "1024",
-}
-
-// defaultImportVariablesTiDB is used in ObtainImportantVariables to retrieve the system
-// variables from downstream in local/importer backend. The values record the default
-// values if missing.
-var defaultImportVariablesTiDB = map[string]string{
-	"tidb_row_format_version": "1",
-}
-
 type TiDBManager struct {
 	db     *sql.DB
 	parser *parser.Parser
 }
 
-func DBFromConfig(ctx context.Context, dsn config.DBStore) (*sql.DB, error) {
-	param := common.MySQLConnectParam{
-		Host:             dsn.Host,
-		Port:             dsn.Port,
-		User:             dsn.User,
-		Password:         dsn.Psw,
-		SQLMode:          dsn.StrSQLMode,
-		MaxAllowedPacket: dsn.MaxAllowedPacket,
-		TLS:              dsn.TLS,
-	}
-
-	db, err := param.Connect()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	vars := map[string]string{
-		"tidb_build_stats_concurrency":       strconv.Itoa(dsn.BuildStatsConcurrency),
-		"tidb_distsql_scan_concurrency":      strconv.Itoa(dsn.DistSQLScanConcurrency),
-		"tidb_index_serial_scan_concurrency": strconv.Itoa(dsn.IndexSerialScanConcurrency),
-		"tidb_checksum_table_concurrency":    strconv.Itoa(dsn.ChecksumTableConcurrency),
-
-		// after https://github.com/pingcap/tidb/pull/17102 merge,
-		// we need set session to true for insert auto_random value in TiDB Backend
-		"allow_auto_random_explicit_insert": "1",
-		// allow use _tidb_rowid in sql statement
-		"tidb_opt_write_row_id": "1",
-		// always set auto-commit to ON
-		"autocommit": "1",
-		// alway set transaction mode to optimistic
-		"tidb_txn_mode": "optimistic",
-	}
-
-	if dsn.Vars != nil {
-		maps.Copy(vars, dsn.Vars)
-	}
-
-	for k, v := range vars {
-		q := fmt.Sprintf("SET SESSION %s = '%s';", k, v)
-		if _, err1 := db.ExecContext(ctx, q); err1 != nil {
-			log.L().Warn("set session variable failed, will skip this query", zap.String("query", q),
-				zap.Error(err1))
-			delete(vars, k)
-		}
-	}
-	_ = db.Close()
-
-	param.Vars = vars
-	db, err = param.Connect()
-	return db, errors.Trace(err)
-}
-
 func NewTiDBManager(ctx context.Context, dsn config.DBStore, tls *common.TLS) (*TiDBManager, error) {
-	db, err := DBFromConfig(ctx, dsn)
+	db, err := lit.DBFromConfig(ctx, dsn)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -301,52 +230,6 @@ func UpdateGCLifeTime(ctx context.Context, db *sql.DB, gcLifeTime string) error 
 		"UPDATE mysql.tidb SET VARIABLE_VALUE = ? WHERE VARIABLE_NAME = 'tikv_gc_life_time'",
 		gcLifeTime,
 	)
-}
-
-func ObtainImportantVariables(ctx context.Context, g glue.SQLExecutor, needTiDBVars bool) map[string]string {
-	var query strings.Builder
-	query.WriteString("SHOW VARIABLES WHERE Variable_name IN ('")
-	first := true
-	for k := range defaultImportantVariables {
-		if first {
-			first = false
-		} else {
-			query.WriteString("','")
-		}
-		query.WriteString(k)
-	}
-	if needTiDBVars {
-		for k := range defaultImportVariablesTiDB {
-			query.WriteString("','")
-			query.WriteString(k)
-		}
-	}
-	query.WriteString("')")
-	kvs, err := g.QueryStringsWithLog(ctx, query.String(), "obtain system variables", log.L())
-	if err != nil {
-		// error is not fatal
-		log.L().Warn("obtain system variables failed, use default variables instead", log.ShortError(err))
-	}
-
-	// convert result into a map. fill in any missing variables with default values.
-	result := make(map[string]string, len(defaultImportantVariables)+len(defaultImportVariablesTiDB))
-	for _, kv := range kvs {
-		result[kv[0]] = kv[1]
-	}
-
-	setDefaultValue := func(res map[string]string, vars map[string]string) {
-		for k, defV := range vars {
-			if _, ok := res[k]; !ok {
-				res[k] = defV
-			}
-		}
-	}
-	setDefaultValue(result, defaultImportantVariables)
-	if needTiDBVars {
-		setDefaultValue(result, defaultImportVariablesTiDB)
-	}
-
-	return result
 }
 
 func ObtainNewCollationEnabled(ctx context.Context, g glue.SQLExecutor) (bool, error) {

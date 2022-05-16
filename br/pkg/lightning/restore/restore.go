@@ -53,6 +53,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/br/pkg/version"
 	"github.com/pingcap/tidb/br/pkg/version/build"
+	lit "github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/meta/autoid"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/util/collate"
@@ -374,7 +375,7 @@ func NewRestoreControllerWithPauser(
 		pauser:        p.Pauser,
 		backend:       backend,
 		tidbGlue:      p.Glue,
-		sysVars:       defaultImportantVariables,
+		sysVars:       lit.DefaultImportantVariables,
 		tls:           tls,
 		checkTemplate: NewSimpleTemplate(),
 
@@ -724,7 +725,7 @@ func (rc *Controller) restoreSchema(ctx context.Context) error {
 	}
 	rc.dbInfos = dbInfos
 
-	sysVars := ObtainImportantVariables(ctx, rc.tidbGlue.GetSQLExecutor(), !rc.isTiDBBackend())
+	sysVars := lit.ObtainImportantVariables(ctx, rc.tidbGlue.GetSQLExecutor(), !rc.isTiDBBackend())
 	// override by manually set vars
 	maps.Copy(sysVars, rc.cfg.TiDB.Vars)
 	rc.sysVars = sysVars

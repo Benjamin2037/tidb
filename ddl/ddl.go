@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/config"
+	lit "github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/kv"
@@ -430,6 +431,9 @@ func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 
 	// Start some background routine to manage TiFlash replica.
 	d.wg.Run(d.PollTiFlashRoutine)
+    
+	// Init Lighting Global environment. Once met error then the
+	lit.InitGolbalLightningBackendEnv()
 
 	return nil
 }
