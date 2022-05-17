@@ -72,6 +72,8 @@ func init() {
 
 func InitGolbalLightningBackendEnv() {
 	var bufferSize uint64
+
+	GlobalLightningEnv.LitMemRoot.init(int64(maxMemLimit))
 	log.SetAppLogger(logutil.BgLogger())
 
 	cfg := config.GetGlobalConfig()
@@ -94,11 +96,10 @@ func InitGolbalLightningBackendEnv() {
 			zap.Error(err),
 			zap.String("will use default memory limitation:", strconv.FormatUint(maxMemLimit, 10)))
 	}
-	GlobalLightningEnv.LitMemRoot.init(int64(maxMemLimit))
 	log.L().Info(LInfo_ENV_INIT_SUCC,
 		zap.String("Memory limitation set to:", strconv.FormatUint(maxMemLimit, 10)),
 	    zap.String("Sort Path disk quota:", strconv.FormatUint(uint64(GlobalLightningEnv.diskQuota), 10)),
-	    zap.String("Max open file number:", strconv.FormatInt(GlobalLightningEnv.limit, 10)))
+	    zap.String("Max open file number:", strconv.Itoa(int(GlobalLightningEnv.limit))))
 	GlobalLightningEnv.IsInited = true
 	return
 }

@@ -431,7 +431,7 @@ func (d *ddl) Start(ctxPool *pools.ResourcePool) error {
 
 	// Start some background routine to manage TiFlash replica.
 	d.wg.Run(d.PollTiFlashRoutine)
-    
+	
 	// Init Lighting Global environment. Once met error then the
 	lit.InitGolbalLightningBackendEnv()
 

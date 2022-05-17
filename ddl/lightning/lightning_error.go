@@ -31,14 +31,11 @@ const (
 	LERR_LOCAL_DUP_EXIST_ERR   string = "Lightning: Locale duplicate index key exist, "
 	LERR_REMOTE_DUP_CHECK_ERR  string = "Lightning: Remote duplicate check err,"
 	LERR_REMOTE_DUP_EXIST_ERR  string = "Lightning: Remote duplicate index key exist,"
-
-
 	// Warning message    
 	LWAR_ENV_INIT_FAILD        string = "Lightning: initialize environment failed"
 	LWAR_BACKEND_NOT_EXIST     string = "Lightning: backend not exist"
 	LWAR_CONFIG_ERROR          string = "Lightning: build config for backend failed"
 	LWAR_GEN_MEM_LIMIT         string = "Lightning: Generate memory max limitation,"
-	
 	// Info message
 	LInfo_ENV_INIT_SUCC        string = "Lightning: Init global lightning backend environment finished."
 	LInfo_SORTED_DIR           string = "Lightning: The lightning sorted dir:."

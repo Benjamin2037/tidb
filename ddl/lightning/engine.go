@@ -35,6 +35,7 @@ import (
 type engineInfo struct {
 	id           int32
 	key          string
+
 	backCtx      *BackendContext
 	openedEngine *backend.OpenedEngine
 	cfg          *backend.EngineConfig
@@ -145,6 +146,7 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 	// Check Remote duplicate value for index
 	if unique {
 		hasDupe, err := ei.backCtx.Backend.CollectRemoteDuplicateRows(ctx, tbl, ei.tableName, &kv.SessionOptions{
+
 			SQLMode: mysql.ModeStrictAllTables,
 			SysVars: ei.backCtx.sysVars,
 		})
