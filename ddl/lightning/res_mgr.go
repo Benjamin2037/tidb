@@ -139,7 +139,6 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 				zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 			return err
 		}
-		
 		bc = new(BackendContext)
 		if bc == nil {
 			return errors.New(LERR_ALLOC_MEM_FAILED)
@@ -165,8 +164,6 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 		bc.Backend = &bd
 		// Init important variables
 		bc.sysVars = ObtainImportantVariables(ctx, bc.tidbGlue, true)
-
-    
 	    if memRequire == firstAlloc {
 		    m.structSize[ALLOC_BACKEND_CONTEXT] = int64(unsafe.Sizeof(*bc))
 	    }
