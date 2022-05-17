@@ -16,7 +16,6 @@ package ddl
 
 import (
 	"context"
-	"github.com/pingcap/tidb/ddl/addindex"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -602,10 +601,9 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 	if isAllowFastDDL(reorgInfo.d.store) {
 		// init the flag, set IsLightningOk to false first.
 		reorgInfo.IsLightningEnabled = false
-		tblInfo, err := GetTableInfoAndCancelFaultJob(t, job, job.SchemaID)
 		// If get tblInfo failed, go back to kernel backfill process.
 		if err == nil {
-			err = prepareLightningEnv(w.ctx, indexInfo.Unique, job, t, tblInfo, true)
+			err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
 			// Once Env is created well, set IsLightningOk to true.
 			if err == nil {
 				reorgInfo.IsLightningEnabled = true
@@ -637,7 +635,7 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 
 		return false, ver, errors.Trace(err)
 	}
-	// Flush data to TiKV
+	// Ingest data to TiKV
 	importIndexDataToStore(w.ctx, reorgInfo, indexInfo.Unique, tbl)
 
 	// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
@@ -1657,9 +1655,4 @@ func findIndexesByColName(indexes []*model.IndexInfo, colName string) ([]*model.
 		}
 	}
 	return idxInfos, offsets
-}
-
-// TODO: delete later. just for cycle import test.
-func ref() {
-	addindex.IndexCycleReference()
 }

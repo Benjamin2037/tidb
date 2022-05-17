@@ -598,6 +598,17 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 
 	// variable.ddlReorgWorkerCounter can be modified by system variable "tidb_ddl_reorg_worker_cnt".
 	workerCnt := variable.GetDDLReorgWorkerCounter()
+	// Caculate worker count for lightnint.
+	// if litWorkerCnt is 0 or err exist, means not good for lightning execution, 
+	// then go back use kernel way to reorg index.
+	litWorkerCnt, lerr := prepareLightningEngine(job, indexInfo.ID, int(workerCnt))
+	if lerr != nil || litWorkerCnt == 0 {
+        reorgInfo.IsLightningEnabled = false
+	} else {
+		if workerCnt > int32(litWorkerCnt) {
+			workerCnt = int32(litWorkerCnt)
+		}
+	}
 	backfillWorkers := make([]*backfillWorker, 0, workerCnt)
 	defer func() {
 		closeBackfillWorkers(backfillWorkers)
@@ -619,6 +630,11 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 		if len(kvRanges) < int(workerCnt) {
 			workerCnt = int32(len(kvRanges))
 		}
+
+		if reorgInfo.IsLightningEnabled && workerCnt > int32(litWorkerCnt) {
+			workerCnt = int32(litWorkerCnt)
+		}
+
 		// Enlarge the worker size.
 		for i := len(backfillWorkers); i < int(workerCnt); i++ {
 			sessCtx := newContext(reorgInfo.d.store)

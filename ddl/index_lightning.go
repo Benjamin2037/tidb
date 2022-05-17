@@ -15,14 +15,12 @@ package ddl
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	lit "github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/kv"
-	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -30,7 +28,6 @@ import (
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/util/logutil"
 	decoder "github.com/pingcap/tidb/util/rowDecoder"
 )
 
@@ -46,34 +43,11 @@ func isAllowFastDDL(storage kv.Storage) bool {
 	}
 }
 
-// Below is the prepare lightning environment logic.
-func prepareLightningEnv(ctx context.Context, unique bool, job *model.Job, t *meta.Meta, tbl *model.TableInfo, openEngine bool) (err error) {
-
-	// Create lightning backend
-	err = prepareBackend(ctx, unique, job)
-
-	// ToDo: Bear here all the worker will share one openengine,
-	if openEngine {
-		err = prepareLightningEngine(job, t, 0, tbl)
-	}
-	return err
-}
-
-func prepareLightningContext(workId int, keyEngine string, kvCount int) (*lit.WorkerContext, error) {
-	wctx, err := lit.GlobalLightningEnv.LitMemRoot.RegistWorkerContext(workId, keyEngine, kvCount)
-	if err != nil {
-		err = errors.New(lit.LERR_CREATE_CONTEX_FAILED)
-		return nil, err
-	}
-	return wctx, err
-}
-
-func prepareBackend(ctx context.Context, unique bool, job *model.Job) (err error) {
-	bcKey := genBackendContextKey(job.ID)
+func prepareBackend(ctx context.Context, unique bool, job *model.Job, sqlMode mysql.SQLMode) (err error) {
+	bcKey := lit.GenBackendContextKey(job.ID)
 	// Create and regist backend of lightning
-	err = lit.GlobalLightningEnv.LitMemRoot.RegistBackendContext(ctx, unique, bcKey)
+	err = lit.GlobalLightningEnv.LitMemRoot.RegistBackendContext(ctx, unique, bcKey, sqlMode)
 	if err != nil {
-		err = errors.New(lit.LERR_CREATE_BACKEND_FAILED)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 		return err
 	}
@@ -81,32 +55,22 @@ func prepareBackend(ctx context.Context, unique bool, job *model.Job) (err error
 	return err
 }
 
-func prepareLightningEngine(job *model.Job, t *meta.Meta, workerId int64, tbl *model.TableInfo) (err error) {
-	bcKey := genBackendContextKey(job.ID)
-	enginKey := genEngineInfoKey(job.ID, workerId)
-	err = lit.GlobalLightningEnv.LitMemRoot.RegistEngineInfo(job, t, bcKey, enginKey, tbl)
+func prepareLightningEngine(job *model.Job, indexId int64, workerCnt int) (wCnt int, err error) {
+	bcKey := lit.GenBackendContextKey(job.ID)
+	enginKey := lit.GenEngineInfoKey(job.ID, indexId)
+	wCnt, err = lit.GlobalLightningEnv.LitMemRoot.RegistEngineInfo(job, bcKey, enginKey, int32(indexId), workerCnt)
 	if err != nil {
-		err = errors.New(lit.LERR_CREATE_ENGINE_FAILED)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	}
-	return err
-}
-
-func genBackendContextKey(jobId int64) string {
-	return strconv.FormatInt(jobId, 10)
-}
-
-func genEngineInfoKey(jobId int64, workerId int64) string {
-	return genBackendContextKey(jobId) + strconv.FormatInt(workerId, 10)
+	return wCnt, err
 }
 
 func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, tbl table.Table) error {
 	if reorg.IsLightningEnabled {
-		keyEngineInfo := genEngineInfoKey(reorg.ID, 0)
+		engineInfoKey := lit.GenEngineInfoKey(reorg.ID, 0)
 		// just log info.
-		err := lit.FinishIndexOp(ctx, keyEngineInfo, tbl, unique)
+		err := lit.FinishIndexOp(ctx, engineInfoKey, tbl, unique)
 		if err != nil {
-			logutil.BgLogger().Error("FinishIndexOp err2" + err.Error())
 			err = errors.Trace(err)
 		}
 	}
@@ -116,36 +80,26 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 func cleanUpLightningEnv(reorg *reorgInfo) {
 	if reorg.IsLightningEnabled {
 		// Close backend
-		bcKey := genBackendContextKey(reorg.ID)
+		bcKey := lit.GenBackendContextKey(reorg.ID)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
-		// at last
-		reorg.IsLightningEnabled = false
 	}
 }
 
 // Below is lightning worker logic
 type addIndexWorkerLit struct {
 	addIndexWorker
-	// Light needed structure.
-	keyEngineInfo string
-	workerctx     *lit.WorkerContext
-	tbl           *model.TableInfo
+    
+	// Lightning related variable.
+	writerContex *lit.WorkerContext
 }
 
 func newAddIndexWorkerLit(sessCtx sessionctx.Context, worker *worker, id int, t table.PhysicalTable, indexInfo *model.IndexInfo, decodeColMap map[int64]decoder.Column, sqlMode mysql.SQLMode, jobId int64) (*addIndexWorkerLit, error) {
-	var workerCtx *lit.WorkerContext
 	index := tables.NewIndex(t.GetPhysicalID(), t.Meta(), indexInfo)
 	rowDecoder := decoder.NewRowDecoder(t, t.WritableCols(), decodeColMap)
 	// ToDo: Bear Currently, all the lightning worker share one openengine.
-	keyEngineInfo := genEngineInfoKey(jobId, 0)
+	engineInfoKey := lit.GenEngineInfoKey(jobId, indexInfo.ID)
 
-	ei, err := lit.GlobalLightningEnv.EngineManager.GetEngineInfo(keyEngineInfo)
-	if err != nil {
-		errors.New(lit.LERR_GET_ENGINE_FAILED)
-		return nil, err
-	}
-	// build worker context for lightning worker.
-	workerCtx, err = prepareLightningContext(id, keyEngineInfo, 1)
+	lwCtx, err := lit.GlobalLightningEnv.LitMemRoot.RegistWorkerContext(engineInfoKey, id)
 	if err != nil {
 		return nil, err
 	}
@@ -163,9 +117,7 @@ func newAddIndexWorkerLit(sessCtx sessionctx.Context, worker *worker, id int, t 
 			},
 			index: index,
 		},
-		keyEngineInfo: keyEngineInfo,
-		workerctx:     workerCtx,
-		tbl:           ei.GetTableInfo(),
+        writerContex: lwCtx,
 	}, err
 }
 
@@ -179,7 +131,6 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 		}
 	})
 
-	// ToDo: Bear need to change use write-reorg started one txn to be the txn scan the table.
 	oprStartTime := time.Now()
 	errInTxn = kv.RunInNewTxn(context.Background(), w.sessCtx.GetStore(), true, func(ctx context.Context, txn kv.Transaction) error {
 		taskCtx.addedCount = 0
@@ -214,22 +165,13 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 			if err != nil {
 				return errors.Trace(err)
 			}
-
 			// Currently, only use one kVCache, later may use multi kvCache to parallel compute/io performance.
-			w.workerctx.KVCache[0].PushKeyValue(key, idxVal, idxRecord.handle)
+            w.writerContex.WriteRow(key, idxVal, idxRecord.handle)
 
 			taskCtx.addedCount++
 		}
-
 		return nil
 	})
-
-	// log.L().Info("[debug-fetch] finish idxRecord info", zap.Int("scanCount", taskCtx.scanCount), zap.Int("addedCount", taskCtx.addedCount))
-	errInTxn = lit.FlushKeyValSync(context.TODO(), w.keyEngineInfo, w.workerctx.KVCache[0])
-	if errInTxn != nil {
-		//logutil.BgLogger().Error("FlushKeyValSync %d paris err: %v.", len(w.workerctx.KVCache[0].Fetch()), errInTxn.Error())
-	}
 	logSlowOperations(time.Since(oprStartTime), "AddIndexLightningBackfillDataInTxn", 3000)
-
 	return
 }

@@ -14,9 +14,10 @@
 package lightning
 
 import (
-	"sync/atomic"
+	"errors"
 
-	"github.com/pingcap/tidb/br/pkg/lightning/backend"
+	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"go.uber.org/zap"
 )
 
 type EngineManager struct {
@@ -27,40 +28,32 @@ func (em *EngineManager) init() {
 	em.engineCache = make(map[string]*engineInfo)
 }
 
-func (em *EngineManager) Put(key string, ei *engineInfo) {
+func (em *EngineManager) StoreEngineInfo(key string, ei *engineInfo) {
 	em.engineCache[key] = ei
 
 }
 
-func (em *EngineManager) GetEngineInfo(key string) (*engineInfo, error) {
-	ei, ok := em.engineCache[key]
-	if !ok {
-		return nil, ErrNotFound
+func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, error) {
+	ei, exist := em.engineCache[key]
+	if !exist {
+		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine_Manager:", "Not found"))
+		return nil, errors.New(LERR_GET_ENGINE_FAILED)
 	}
 
 	return ei, nil
 }
 
-func (em *EngineManager) ReleaseRef(key string) {
-	ei := em.engineCache[key]
-	if ei == nil {
-		return
-	}
-	atomic.CompareAndSwapInt32(&ei.ref, 1, 0)
-}
-
-func (em *EngineManager) GetWriter(key string) (*backend.LocalEngineWriter, error) {
-	ei, err := em.GetEngineInfo(key)
-	if err != nil {
-		return nil, err
-	}
-	return ei.getWriter()
-}
-
 func (em *EngineManager) ReleaseEngine(key string) {
-	ei, exist := em.engineCache[key]
-	if !exist {
-		return
+	log.L().Info(LINFO_ENGINE_DELETE, zap.String("Engine info key:", key))
+	delete(em.engineCache, key)
+	return
+}
+
+// TotalSize funcation cacluation from engine perspect.
+func (em *EngineManager) totalSize() int64 {
+	var memUsed int64
+	for _, en := range em.engineCache {
+		memUsed += en.openedEngine.TotalMemoryConsume()
 	}
-	ei.isOpened = false
+	return memUsed
 }
