@@ -36,7 +36,7 @@ func (em *EngineManager) StoreEngineInfo(key string, ei *engineInfo) {
 func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, error) {
 	ei, exist := em.engineCache[key]
 	if !exist {
-		log.L().Warn(LERR_GET_ENGINE_FAILED, zap.String("Engine_Manager:", "Not found"))
+		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine_Manager:", "Not found"))
 		return nil, errors.New(LERR_GET_ENGINE_FAILED)
 	}
 
@@ -44,10 +44,12 @@ func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, error) {
 }
 
 func (em *EngineManager) ReleaseEngine(key string) {
+	log.L().Info(LINFO_ENGINE_DELETE, zap.String("Engine info key:", key))
 	delete(em.engineCache, key)
 	return
 }
 
+// TotalSize funcation cacluation from engine perspect.
 func (em *EngineManager) totalSize() int64 {
 	var memUsed int64
 	for _, en := range em.engineCache {

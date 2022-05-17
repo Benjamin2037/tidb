@@ -57,7 +57,7 @@ var (
 
 func init() {
 	GlobalLightningEnv.limit = 1024           // Init a default value 1024 for limit.
-	GlobalLightningEnv.diskQuota = 10 * _gb // default disk quota set to 10 GB
+	GlobalLightningEnv.diskQuota = 10 * _gb   // default disk quota set to 10 GB
 	var rLimit syscall.Rlimit
 	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
@@ -71,34 +71,48 @@ func init() {
 }
 
 func InitGolbalLightningBackendEnv() {
+	var bufferSize uint64
+	log.SetAppLogger(logutil.BgLogger())
+
 	cfg := config.GetGlobalConfig()
 	GlobalLightningEnv.PdAddr = cfg.AdvertiseAddress
 	GlobalLightningEnv.Port = cfg.Port
 	GlobalLightningEnv.Status = cfg.Status.StatusPort
     GlobalLightningEnv.SortPath = genLightningDataDir()
-    GlobalLightningEnv.parseDiskQuota()
+    err := GlobalLightningEnv.parseDiskQuota()
 	// Set Memory usage limitation to 1 GB
 	sbz := variable.GetSysVar("sort_buffer_size")
-	bufferSize, err := strconv.ParseUint(sbz.Value, 10, 32)
+	bufferSize, err = strconv.ParseUint(sbz.Value, 10, 64)
 	// If get bufferSize err, then maxMemLimtation is 128 MB
 	// Otherwise, the ddl maxMemLimitation is 1 GB
 	if err == nil {
 		maxMemLimit  = bufferSize * 4 * _kb
+		log.L().Info(LINFO_GEN_MEM_LIMIT,
+			zap.String("Memory limitation set to:", strconv.FormatUint(maxMemLimit, 10)))
+	} else {
+		log.L().Info(LWAR_GEN_MEM_LIMIT,
+			zap.Error(err),
+			zap.String("will use default memory limitation:", strconv.FormatUint(maxMemLimit, 10)))
 	}
 	GlobalLightningEnv.LitMemRoot.init(int64(maxMemLimit))
-	log.SetAppLogger(logutil.BgLogger())
-	log.L().Info(LInfo_ENV_INIT_SUCC)
+	log.L().Info(LInfo_ENV_INIT_SUCC,
+		zap.String("Memory limitation set to:", strconv.FormatUint(maxMemLimit, 10)),
+	    zap.String("Sort Path disk quota:", strconv.FormatUint(uint64(GlobalLightningEnv.diskQuota), 10)),
+	    zap.String("Max open file number:", strconv.FormatInt(GlobalLightningEnv.limit, 10)))
 	GlobalLightningEnv.IsInited = true
 	return
 }
 
-func (l *LightningEnv) parseDiskQuota() {
+func (l *LightningEnv) parseDiskQuota() error {
 	sz, err := lcom.GetStorageSize(l.SortPath)
 	if err != nil {
-		log.L().Warn(LERR_GET_STORAGE_QUOTA, zap.String("Os error:", err.Error()), zap.String("default size", "10G"))
-		return
+		log.L().Error(LERR_GET_STORAGE_QUOTA,
+			zap.String("Os error:", err.Error()),
+			zap.String("default disk quota", strconv.FormatInt(l.diskQuota, 10)))
+		return err
 	}
 	l.diskQuota = int64(sz.Available)
+    return err
 }
 
 // Generate lightning local store dir in TiDB datadir. 
@@ -111,6 +125,7 @@ func genLightningDataDir() string {
 	} else {
 		sortPath = dataDir.Value + "lightning"
 	}
+	log.L().Info(LInfo_SORTED_DIR, zap.String("data path:", sortPath))
 	return sortPath
 }
 

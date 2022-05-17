@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/util/logutil"
 	decoder "github.com/pingcap/tidb/util/rowDecoder"
 )
 
@@ -49,7 +48,6 @@ func prepareBackend(ctx context.Context, unique bool, job *model.Job, sqlMode my
 	// Create and regist backend of lightning
 	err = lit.GlobalLightningEnv.LitMemRoot.RegistBackendContext(ctx, unique, bcKey, sqlMode)
 	if err != nil {
-		err = errors.New(lit.LERR_CREATE_BACKEND_FAILED)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 		return err
 	}
@@ -62,7 +60,6 @@ func prepareLightningEngine(job *model.Job, indexId int64, workerCnt int) (wCnt 
 	enginKey := lit.GenEngineInfoKey(job.ID, indexId)
 	wCnt, err = lit.GlobalLightningEnv.LitMemRoot.RegistEngineInfo(job, bcKey, enginKey, int32(indexId), workerCnt)
 	if err != nil {
-		err = errors.New(lit.LERR_CREATE_ENGINE_FAILED)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	}
 	return wCnt, err
@@ -70,11 +67,10 @@ func prepareLightningEngine(job *model.Job, indexId int64, workerCnt int) (wCnt 
 
 func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, tbl table.Table) error {
 	if reorg.IsLightningEnabled {
-		keyEngineInfo := lit.GenEngineInfoKey(reorg.ID, 0)
+		engineInfoKey := lit.GenEngineInfoKey(reorg.ID, 0)
 		// just log info.
-		err := lit.FinishIndexOp(ctx, keyEngineInfo, tbl, unique)
+		err := lit.FinishIndexOp(ctx, engineInfoKey, tbl, unique)
 		if err != nil {
-			logutil.BgLogger().Error("FinishIndexOp err2" + err.Error())
 			err = errors.Trace(err)
 		}
 	}
@@ -86,8 +82,6 @@ func cleanUpLightningEnv(reorg *reorgInfo) {
 		// Close backend
 		bcKey := lit.GenBackendContextKey(reorg.ID)
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
-		// at last
-		reorg.IsLightningEnabled = false
 	}
 }
 
@@ -106,10 +100,6 @@ func newAddIndexWorkerLit(sessCtx sessionctx.Context, worker *worker, id int, t 
 	engineInfoKey := lit.GenEngineInfoKey(jobId, indexInfo.ID)
 
 	lwCtx, err := lit.GlobalLightningEnv.LitMemRoot.RegistWorkerContext(engineInfoKey, id)
-	if err != nil {
-		errors.New(lit.LERR_GET_ENGINE_FAILED)
-		return nil, err
-	}
 	if err != nil {
 		return nil, err
 	}

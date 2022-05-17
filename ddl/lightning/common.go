@@ -12,10 +12,39 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/br/pkg/lightning/glue"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/parser/mysql"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 )
+type TiDBManager struct {
+	db     *sql.DB
+	parser *parser.Parser
+}
 
+func NewTiDBManager(ctx context.Context, dsn config.DBStore, tls *common.TLS) (*TiDBManager, error) {
+	db, err := DBFromConfig(ctx, dsn)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return NewTiDBManagerWithDB(db, dsn.SQLMode), nil
+}
+
+// NewTiDBManagerWithDB creates a new TiDB manager with an existing database
+// connection.
+func NewTiDBManagerWithDB(db *sql.DB, sqlMode mysql.SQLMode) *TiDBManager {
+	parser := parser.New()
+	parser.SetSQLMode(sqlMode)
+
+	return &TiDBManager{
+		db:     db,
+		parser: parser,
+	}
+}
+func (timgr *TiDBManager) Close() {
+	timgr.db.Close()
+}
 // DefaultImportantVariables is used in ObtainImportantVariables to retrieve the system
 // variables from downstream which may affect KV encode result. The values record the default
 // values if missing.

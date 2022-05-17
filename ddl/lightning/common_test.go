@@ -1,6 +1,39 @@
 package lightning
+
+import (
+	"context"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/pingcap/tidb/br/pkg/lightning/glue"
+	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/stretchr/testify/require"
+)
+type tidbSuite struct {
+	mockDB sqlmock.Sqlmock
+	timgr  *TiDBManager
+	tiGlue glue.Glue
+}
+
+func NewTiDBSuite(t *testing.T) (*tidbSuite, func()) {
+	var s tidbSuite
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+
+	s.mockDB = mock
+	defaultSQLMode, err := mysql.GetSQLMode(mysql.DefaultSQLMode)
+	require.NoError(t, err)
+
+	s.timgr = NewTiDBManagerWithDB(db, defaultSQLMode)
+	s.tiGlue = glue.NewExternalTiDBGlue(db, defaultSQLMode)
+	return &s, func() {
+		s.timgr.Close()
+		require.NoError(t, s.mockDB.ExpectationsWereMet())
+	}
+}
+
 func TestObtainRowFormatVersionSucceed(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -36,7 +69,7 @@ func TestObtainRowFormatVersionSucceed(t *testing.T) {
 }
 
 func TestObtainRowFormatVersionFailure(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 

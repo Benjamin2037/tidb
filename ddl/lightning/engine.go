@@ -73,12 +73,16 @@ func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engine
 
 	en, err := be.OpenEngine(ctx, &cfg, job.TableName, indexId)
 	if err != nil {
-		return errors.Errorf("PrepareIndexOp.OpenEngine err:%v", err)
+		errMsg := LERR_CREATE_ENGINE_FAILED + err.Error()
+		log.L().Error(errMsg)
+		return errors.New(errMsg)
 	}
 	ei.Init(indexId, engineKey, &cfg, bc, en, job.TableName)
 	GlobalLightningEnv.LitMemRoot.EngineMgr.StoreEngineInfo(engineKey, ei)
 	bc.EngineCache[engineKey] = ei
-
+    log.L().Info(LINFO_OPEN_ENGINE, 
+		zap.String("backend key", ei.backCtx.Key),
+		zap.String("Engine key", ei.key))
 	return nil
 }
 
@@ -172,6 +176,7 @@ func (wCtx *WorkerContext)InitWorkerContext (engineKey string, workerid int) (er
 	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.engineCache[engineKey]
     
 	if !exist {
+		
 		return errors.New(LERR_GET_ENGINE_FAILED)
 	} 
 	wCtx.eInfo= ei;

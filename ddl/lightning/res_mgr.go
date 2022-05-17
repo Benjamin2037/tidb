@@ -16,6 +16,7 @@ package lightning
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -128,6 +129,9 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
     m.totalMemoryConsume()
 	memRequire, err = m.checkMemoryUsage(ALLOC_BACKEND_CONTEXT)
 	if err != nil {
+		log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("backend key", key),
+		    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	        zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 		return err
 	}
 
@@ -149,10 +153,12 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 		bc.cfg, err = generateLightningConfig(ctx, unique)
 		adjustImportMemory(bc.cfg)
 		if err != nil {
+			log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.String("backend key", key))
 			return err
 		}
 		bd, err = createLocalBackend(ctx, bc.cfg, bc.tidbGlue)
 		if err != nil {
+			log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.String("backend key", key))
 			return err
 		}
 		bc.Backend = &bd
@@ -165,6 +171,9 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 	}
 	// Count memory usage.
 	m.currUsage += m.structSize[ALLOC_BACKEND_CONTEXT]
+	log.L().Info(LINFO_CREATE_BACKEND, zap.String("backend key", key),
+        zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	    zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 	return err
 }
 
@@ -175,9 +184,10 @@ func (m *LightningMemoryRoot) DeleteBackendContext(bcKey string) {
 	defer func() {
 		m.mLock.Unlock()
 	}()
-	// Close key specif
+	// Close key specific backend 
 	bc, exist := m.backendCache[bcKey]
 	if !exist {
+		log.L().Error(LERR_GET_BACKEND_FAILED, zap.String("backend key", bcKey))
 		return
 	}
 
@@ -188,6 +198,9 @@ func (m *LightningMemoryRoot) DeleteBackendContext(bcKey string) {
 	bc.Backend.Close()
 	m.currUsage -= m.structSize[bc.Key]
 	m.currUsage -= m.structSize[ALLOC_BACKEND_CONTEXT]
+	log.L().Info(LINFO_CLOSE_BACKEND, zap.String("backend key", bcKey),
+	    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	    zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 	return
 }
 
@@ -206,6 +219,10 @@ func (m *LightningMemoryRoot) RegistEngineInfo(job *model.Job, bcKey string, eng
     m.totalMemoryConsume()
 	memRequire, err = m.checkMemoryUsage(ALLOC_ENGINE_INFO)
 	if err != nil {
+		log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("backend key", bcKey),
+		    zap.String("Engine key", engineKey),
+		    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	        zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 		return 0, err
 	}
 
@@ -230,6 +247,10 @@ func (m *LightningMemoryRoot) RegistEngineInfo(job *model.Job, bcKey string, eng
 	// Count memory usage.
 	m.currUsage += m.structSize[ALLOC_ENGINE_INFO]
 	m.engineUsage += m.structSize[ALLOC_ENGINE_INFO]
+	log.L().Info(LINFO_OPEN_ENGINE, zap.String("backend key", bcKey),
+	zap.String("Engine key", engineKey),
+	zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 	return  workerCount, nil
 }
 
@@ -248,12 +269,22 @@ func (m *LightningMemoryRoot) RegistWorkerContext(engineInfoKey string, id int) 
     m.totalMemoryConsume()
 	memRequire, err = m.checkMemoryUsage(ALLOC_WORKER_CONTEXT)
 	if err != nil {
+		log.L().Error(LERR_ALLOC_MEM_FAILED, zap.String("Engine key", engineInfoKey),
+		zap.String("worer Id:", strconv.Itoa(id)),
+		zap.String("Memory allocate:", strconv.FormatInt(memRequire, 10)),
+		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 		return nil, err
 	}
 
 	wCtx = new(WorkerContext)
 	err = wCtx.InitWorkerContext(engineInfoKey, id)
 	if err != nil {
+		log.L().Error(LERR_CREATE_CONTEX_FAILED, zap.String("Engine key", engineInfoKey),
+		zap.String("worer Id:", strconv.Itoa(id)),
+		zap.String("Memory allocate:", strconv.FormatInt(memRequire, 10)),
+		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 		return nil, err
 	}
 
@@ -262,6 +293,11 @@ func (m *LightningMemoryRoot) RegistWorkerContext(engineInfoKey string, id int) 
 	}
 	// Count memory usage.
 	m.currUsage += m.structSize[ALLOC_WORKER_CONTEXT]
+	log.L().Info(LINFO_CREATE_WRITER, zap.String("Engine key", engineInfoKey),
+	zap.String("worer Id:", strconv.Itoa(id)),
+	zap.String("Memory allocate:", strconv.FormatInt(memRequire, 10)),
+	zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 	return wCtx, err
 }
 
@@ -271,6 +307,7 @@ func (m *LightningMemoryRoot) deleteBcEngine(bcKey string) error {
 	var count  int = 0
 	bc, exist := m.getBackendContext(bcKey)
 	if !exist {
+		log.L().Error(LERR_GET_BACKEND_FAILED, zap.String("backend key", bcKey))
 		return err
 	}
 	count = 0
@@ -284,6 +321,9 @@ func (m *LightningMemoryRoot) deleteBcEngine(bcKey string) error {
 	bc.EngineCache = make(map[string]*engineInfo)
 	m.currUsage -= m.structSize[ALLOC_ENGINE_INFO] * int64(count)
 	m.engineUsage -= m.structSize[ALLOC_ENGINE_INFO] * int64(count)
+	log.L().Info(LINFO_CLOSE_BACKEND, zap.String("backend key", bcKey),
+	    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	    zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
 	return err
 }
 

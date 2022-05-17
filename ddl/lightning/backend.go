@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/br/pkg/lightning/glue"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"go.uber.org/zap"
 )
 
 type BackendContext struct {
@@ -50,7 +51,7 @@ func generateLightningConfig(ctx context.Context, unique bool) (*config.Config, 
 	// Should not output err, after go through cfg.adjust function.
 	err :=cfg.Adjust(ctx)
 	if err != nil {
-		log.L().Warn(LWAR_CONFIG_ERROR)
+		log.L().Warn(LWAR_CONFIG_ERROR, zap.Error(err))
 		return nil, err
 	}
 	cfg.Checkpoint.Enable = false
@@ -69,6 +70,7 @@ func generateLightningConfig(ctx context.Context, unique bool) (*config.Config, 
 func createLocalBackend(ctx context.Context, cfg *config.Config, glue glue.Glue) (backend.Backend, error) {
 	tls, err := cfg.ToTLS()
 	if err != nil {
+		log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.Error(err))
 		return backend.Backend{}, err
 	}
     
@@ -76,6 +78,7 @@ func createLocalBackend(ctx context.Context, cfg *config.Config, glue glue.Glue)
 }
 
 func CloseBackend(bcKey string) {
+	log.L().Info(LINFO_CLOSE_BACKEND, zap.String("backend key", bcKey))
 	GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	return
 }
@@ -88,17 +91,27 @@ func adjustImportMemory(cfg *config.Config) {
 	var scale int64
 	defaultMemSize := int64(cfg.TikvImporter.LocalWriterMemCacheSize) * int64(cfg.TikvImporter.RangeConcurrency)
 	defaultMemSize += 4 * int64(cfg.TikvImporter.EngineMemCacheSize)
-    
+    log.L().Info(LINFO_INIT_MEM_SETTING,
+	    zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+		zap.String("EngineMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+	    zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
+
 	if defaultMemSize > GlobalLightningEnv.LitMemRoot.maxLimit {
 		scale = defaultMemSize / GlobalLightningEnv.LitMemRoot.maxLimit
 	}
     
+	// scale equal to 1 means there is no need to adjust memory settings for lightning.
 	if scale == 1 {
 		return
 	}
 
 	cfg.TikvImporter.LocalWriterMemCacheSize /= config.ByteSize(scale)
 	cfg.TikvImporter.EngineMemCacheSize /= config.ByteSize(scale)
-    // ToDo adjust rangecourrency nubmer to control total concurrency.
+    // ToDo adjust rangecourrency nubmer to control total concurrency in future.
+	log.L().Info(LINFO_CHG_MEM_SETTING,
+	    zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+		zap.String("EngineMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+		zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
+
 	return
 }
