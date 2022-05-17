@@ -125,20 +125,20 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 	defer func() {
 		m.mLock.Unlock()
 	}()
-	// First to check the memory usage
-    m.totalMemoryConsume()
-	memRequire, err = m.checkMemoryUsage(ALLOC_BACKEND_CONTEXT)
-	if err != nil {
-		log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("backend key", key),
-		    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
-	        zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
-		return err
-	}
-
 	// Firstly, get backend Context from backend cache.
-	bc, exist = m.backendCache[key]
-	// If bc not exist, build one
+	_, exist = m.backendCache[key]
+	// If bc not exist, build new backend for reorg task, otherwise reuse exist backend 
+	// to continue the task.
 	if exist == false {
+		// First to check the memory usage
+		m.totalMemoryConsume()
+		memRequire, err = m.checkMemoryUsage(ALLOC_BACKEND_CONTEXT)
+		if err != nil {
+			log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("backend key", key),
+				zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+				zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+			return err
+		}
 		bc = new(BackendContext)
 		if bc == nil {
 			return errors.New(LERR_ALLOC_MEM_FAILED)
@@ -164,16 +164,15 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 		bc.Backend = &bd
 		// Init important variables
 		bc.sysVars = ObtainImportantVariables(ctx, bc.tidbGlue, true)
-	}
-    
-	if memRequire == firstAlloc {
-		m.structSize[ALLOC_BACKEND_CONTEXT] = int64(unsafe.Sizeof(*bc))
-	}
-	// Count memory usage.
-	m.currUsage += m.structSize[ALLOC_BACKEND_CONTEXT]
-	log.L().Info(LINFO_CREATE_BACKEND, zap.String("backend key", key),
-        zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
-	    zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+	    if memRequire == firstAlloc {
+		    m.structSize[ALLOC_BACKEND_CONTEXT] = int64(unsafe.Sizeof(*bc))
+	    }
+	    // Count memory usage.
+	    m.currUsage += m.structSize[ALLOC_BACKEND_CONTEXT]
+	    log.L().Info(LINFO_CREATE_BACKEND, zap.String("backend key", key),
+            zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
+	        zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+	} 
 	return err
 }
 
@@ -191,16 +190,34 @@ func (m *LightningMemoryRoot) DeleteBackendContext(bcKey string) {
 		return
 	}
 
-	// Delete all workerContext and engineInfo registed under one backend
+    // Close and delete backend by key
 	m.deleteBcEngine(bcKey)
-
-	// Close and delete backend by key
 	bc.Backend.Close()
+
 	m.currUsage -= m.structSize[bc.Key]
 	m.currUsage -= m.structSize[ALLOC_BACKEND_CONTEXT]
 	log.L().Info(LINFO_CLOSE_BACKEND, zap.String("backend key", bcKey),
 	    zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage,10)),
 	    zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+	return
+}
+
+// In exception case, clear intermediate files that lightning engine generated for index.
+func(m *LightningMemoryRoot) ClearEngines(jobId int64, indexIds ...int64) {
+    for _, indexId := range indexIds {
+        eiKey := GenEngineInfoKey(jobId, indexId)
+	    ei, exist := m.EngineMgr.engineCache[eiKey]
+	    if exist {
+		    indexEngine := ei.openedEngine
+		    closedEngine, err := indexEngine.Close(ei.backCtx.Ctx, ei.cfg)
+            if err != nil {
+			    log.L().Error(LERR_CLOSE_ENGINE_ERR, zap.String("Engine key", eiKey))
+			    return
+		    }
+		    // Here the local intermediate file will be removed.
+		    closedEngine.Cleanup(ei.backCtx.Ctx)
+	    }
+	}
 	return
 }
 
@@ -301,7 +318,7 @@ func (m *LightningMemoryRoot) RegistWorkerContext(engineInfoKey string, id int) 
 	return wCtx, err
 }
 
-// Uniform entry to release KVCache slice related memory allocated
+// Uniform entry to release Engine info.
 func (m *LightningMemoryRoot) deleteBcEngine(bcKey string) error {
 	var err    error = nil
 	var count  int = 0
