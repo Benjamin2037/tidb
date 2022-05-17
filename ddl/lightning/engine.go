@@ -127,7 +127,9 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 	}
 
 	// Ingest data to TiKV
-	log.L().Info(LINFO_START_TO_IMPORT, zap.String("backend key", ei.backCtx.Key), zap.String("Engine key", ei.key))
+	log.L().Info(LINFO_START_TO_IMPORT, zap.String("backend key", ei.backCtx.Key),
+	    zap.String("Engine key", ei.key),
+		zap.String("Split Region Size", strconv.FormatInt(int64(config.SplitRegionSize), 10)))
 	err = closeEngine.Import(ctx, int64(config.SplitRegionSize))
 	if err != nil {
 		errMsg = LERR_INGEST_DATA_ERR + keyMsg

@@ -630,6 +630,11 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 				logutil.BgLogger().Warn("[ddl] run add index job failed, convert job to rollback, RemoveDDLReorgHandle failed", zap.String("job", job.String()), zap.Error(err1))
 			}
 		}
+		// Clean job related lightning backend data, will handle both user cancel ddl job and
+		// others errors that occurs in reorg processing.
+		// For error that will rollback the add index statement, here only remove locale lightning
+		// files, other rollback process will follow add index roll back flow.
+        cleanUpLightningEnv(reorgInfo, true, indexInfo.ID)
 		// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
 		w.reorgCtx.cleanNotifyReorgCancel()
 
@@ -642,7 +647,7 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 	w.reorgCtx.cleanNotifyReorgCancel()
 
 	// Cleanup lightning environment
-	cleanUpLightningEnv(reorgInfo)
+	cleanUpLightningEnv(reorgInfo, false)
 
 	return true, ver, errors.Trace(err)
 }

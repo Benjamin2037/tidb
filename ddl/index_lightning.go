@@ -65,6 +65,7 @@ func prepareLightningEngine(job *model.Job, indexId int64, workerCnt int) (wCnt 
 	return wCnt, err
 }
 
+// Import local index sst file into TiKV.
 func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, tbl table.Table) error {
 	if reorg.IsLightningEnabled {
 		engineInfoKey := lit.GenEngineInfoKey(reorg.ID, 0)
@@ -77,10 +78,14 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 	return nil
 }
 
-func cleanUpLightningEnv(reorg *reorgInfo) {
+// Used to clean backend, 
+func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
 	if reorg.IsLightningEnabled {
-		// Close backend
 		bcKey := lit.GenBackendContextKey(reorg.ID)
+		// If reorg is cancled, need do clean up engine.
+		if isCanceled {
+			lit.GlobalLightningEnv.LitMemRoot.ClearEngines(reorg.ID, indexIds...)
+		}
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	}
 }
