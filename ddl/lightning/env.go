@@ -14,6 +14,7 @@
 package lightning
 
 import (
+	"os"
 	"strconv"
 	"syscall"
 
@@ -119,12 +120,29 @@ func (l *LightningEnv) parseDiskQuota() error {
 // Generate lightning local store dir in TiDB datadir. 
 func genLightningDataDir() string {
 	dataDir := variable.GetSysVar(variable.DataDir)
-	var sortPath string
+	var sortPath string = "/tmp/lightning/"
 	// If DataDir is not a dir path(strat with /), then set lightning to /tmp/lightning
-	if string(dataDir.Value[0]) != "/" {
-		sortPath = "/tmp/lightning"
-	} else {
-		sortPath = dataDir.Value + "lightning"
+	if string(dataDir.Value[0]) == "/" {
+		sortPath = dataDir.Value + "/lightning/"
+	}
+	shouldCreate := true
+	if info, err := os.Stat(sortPath); err != nil {
+		if !os.IsNotExist(err) {
+			log.L().Error(LERR_CREATE_DIR_FAILED, zap.String("Sort path:", sortPath),
+		        zap.String("Error:", err.Error()))
+			return "/tmp/lightning/"
+		}
+	} else if info.IsDir() {
+		shouldCreate = false
+	}
+
+	if shouldCreate {
+		err := os.Mkdir(sortPath, 0o700)
+		if err != nil {
+			log.L().Error(LERR_CREATE_DIR_FAILED, zap.String("Sort path:", sortPath),
+		        zap.String("Error:", err.Error()))
+			return "/tmp/lightning/"
+		}
 	}
 	log.L().Info(LInfo_SORTED_DIR, zap.String("data path:", sortPath))
 	return sortPath

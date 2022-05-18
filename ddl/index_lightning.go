@@ -90,6 +90,29 @@ func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
 	}
 }
 
+// Flush data to local storage
+func flushData(jobId int64, indexIds int64) error {
+    return lit.FlushEngine(jobId, indexIds)
+}
+
+// Check if this reorg is a restore reorg task
+// Check if current lightning reorg task can be executed continuely.
+// Otherwise, restart the reorg task.
+func canRestoreReorgTask(reorg *reorgInfo, indexId int64) bool {
+	// The reorg just start, do nothing
+	if reorg.SnapshotVer == 0 {
+		return false
+	}
+
+	// Check if backend and engine are cached.
+	if !lit.CanRestoreReorgTask(reorg.ID, indexId) {
+        reorg.SnapshotVer = 0
+		reorg.IsLightningEnabled = true
+		return false
+	}
+	return true
+}
+
 // Below is lightning worker logic
 type addIndexWorkerLit struct {
 	addIndexWorker

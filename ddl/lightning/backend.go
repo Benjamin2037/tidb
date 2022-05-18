@@ -42,7 +42,7 @@ func (bc *BackendContext) init(k string, b *backend.Backend) {
 	bc.EngineCache = make(map[string]*engineInfo)
 }
 
-func generateLightningConfig(ctx context.Context, unique bool) (*config.Config, error) {
+func generateLightningConfig(ctx context.Context, unique bool, bcKey string) (*config.Config, error) {
 	cfg := config.NewConfig()
 	gCfg := config.NewGlobalConfig()
 	cfg.LoadFromGlobal(gCfg)
@@ -54,8 +54,10 @@ func generateLightningConfig(ctx context.Context, unique bool) (*config.Config, 
 		log.L().Warn(LWAR_CONFIG_ERROR, zap.Error(err))
 		return nil, err
 	}
-	cfg.Checkpoint.Enable = false
-	cfg.TikvImporter.SortedKVDir = GlobalLightningEnv.SortPath
+	cfg.Checkpoint.Enable = true
+
+	// Each backend will build an single dir in linghtning dir.
+	cfg.TikvImporter.SortedKVDir = GlobalLightningEnv.SortPath + bcKey + "/"
 	if unique {
 		cfg.TikvImporter.DuplicateResolution = config.DupeResAlgRecord
 	} else {
