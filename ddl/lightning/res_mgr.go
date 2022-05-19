@@ -150,7 +150,7 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 			return err
 		}
 		bc.tidbGlue = glue.NewExternalTiDBGlue(db, sqlMode)
-		bc.cfg, err = generateLightningConfig(ctx, unique)
+		bc.cfg, err = generateLightningConfig(ctx, unique, key)
 		adjustImportMemory(bc.cfg)
 		if err != nil {
 			log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.String("backend key", key))

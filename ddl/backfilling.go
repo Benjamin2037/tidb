@@ -601,14 +601,17 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 	// Caculate worker count for lightnint.
 	// if litWorkerCnt is 0 or err exist, means not good for lightning execution, 
 	// then go back use kernel way to reorg index.
-	litWorkerCnt, lerr := prepareLightningEngine(job, indexInfo.ID, int(workerCnt))
-	if lerr != nil || litWorkerCnt == 0 {
-        reorgInfo.IsLightningEnabled = false
-	} else {
-		if workerCnt > int32(litWorkerCnt) {
-			workerCnt = int32(litWorkerCnt)
-		}
-	}
+	var litWorkerCnt int
+	if reorgInfo.IsLightningEnabled {
+		litWorkerCnt, err = prepareLightningEngine(job, indexInfo.ID, int(workerCnt))
+		if err != nil || litWorkerCnt == 0 {
+			reorgInfo.IsLightningEnabled = false
+		} else {
+			if workerCnt > int32(litWorkerCnt) {
+				workerCnt = int32(litWorkerCnt)
+			}
+	    }
+    }
 	backfillWorkers := make([]*backfillWorker, 0, workerCnt)
 	defer func() {
 		closeBackfillWorkers(backfillWorkers)
@@ -726,11 +729,15 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 		if err != nil {
 			return errors.Trace(err)
 		}
-
 		if len(remains) == 0 {
 			break
 		}
 		startKey = remains[0].StartKey
+		// Do lightning flush data to make checkpoint.
+		err = flushData(reorgInfo.ID, indexInfo.ID)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 	return nil
 }

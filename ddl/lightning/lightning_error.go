@@ -18,6 +18,7 @@ const (
 	LERR_ALLOC_MEM_FAILED      string = "Lightning: Alloc memory failed."
 	LERR_OUT_OF_MAX_MEM        string = "Lightning: Memory is used up for Lightning add index."
 	LERR_NO_MEM_TYPE           string = "Lightning: Unking structure for Lightning add index."
+	LERR_CREATE_DIR_FAILED     string = "Lightning: Create lightning sort part err,"
 	LERR_CREATE_BACKEND_FAILED string = "Lightning: Build lightning backend failed, will use kernel index reorg method to backfill the index."
 	LERR_GET_BACKEND_FAILED    string = "Lightning: Get lightning backend failed"
 	LERR_CREATE_ENGINE_FAILED  string = "Lightning: Build lightning engine failed, will use kernel index reorg method to backfill the index."
@@ -31,6 +32,7 @@ const (
 	LERR_LOCAL_DUP_EXIST_ERR   string = "Lightning: Locale duplicate index key exist, "
 	LERR_REMOTE_DUP_CHECK_ERR  string = "Lightning: Remote duplicate check err,"
 	LERR_REMOTE_DUP_EXIST_ERR  string = "Lightning: Remote duplicate index key exist,"
+	LERR_FLUSH_ENGINE_ERR      string = "Lightning: Flush engine data err,"
 	// Warning message    
 	LWAR_ENV_INIT_FAILD        string = "Lightning: initialize environment failed"
 	LWAR_BACKEND_NOT_EXIST     string = "Lightning: backend not exist"

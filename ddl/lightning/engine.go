@@ -87,15 +87,15 @@ func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engine
 	return nil
 }
 
-func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, unique bool) (err error) {
+func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, unique bool) (err error) {
 	var errMsg string
 	var keyMsg string
-	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(keyEngineInfo)
+	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		GlobalLightningEnv.LitMemRoot.EngineMgr.ReleaseEngine(keyEngineInfo)
+		GlobalLightningEnv.LitMemRoot.EngineMgr.ReleaseEngine(engineInfoKey)
 	}()
     
 	keyMsg = "backend key:" + ei.backCtx.Key + "Engine key:" + ei.key
@@ -165,6 +165,20 @@ func FinishIndexOp(ctx context.Context, keyEngineInfo string, tbl table.Table, u
 	return nil
 }
 
+func FlushEngine(jobId int64,indexId int64) error {
+	engineKey := GenEngineInfoKey(jobId, indexId)
+	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineKey)
+	if err != nil {
+		return err
+	}
+    err = ei.openedEngine.Flush(ei.backCtx.Ctx)
+	if err != nil {
+		log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey))
+		return err
+	}
+	return nil
+}
+
 type WorkerContext struct {
 	eInfo     *engineInfo
 	lWrite    *backend.LocalEngineWriter
@@ -206,4 +220,17 @@ func (wCtx *WorkerContext)WriteRow(key, idxVal []byte, h tidbkv.Handle) {
 	kvs[0].Val = idxVal
 	kvs[0].RowID = h.IntValue()
 	wCtx.lWrite.WriteRow(wCtx.eInfo.backCtx.Ctx, nil, kvs)
+}
+
+// Only when backend and Engine still be cached, then the task could be restore,
+// otherwise return false to let reorg task restart.
+func CanRestoreReorgTask(jobId int64, indexId int64) bool {
+	engineInfoKey := GenEngineInfoKey(jobId, indexId)
+    bcKey := GenBackendContextKey(jobId)
+	_, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
+	_, err1 := GlobalLightningEnv.LitMemRoot.getBackendContext(bcKey)
+	if err != nil || !err1 {
+		return false
+	}
+	return true
 }

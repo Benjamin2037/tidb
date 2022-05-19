@@ -31,6 +31,10 @@ import (
 	decoder "github.com/pingcap/tidb/util/rowDecoder"
 )
 
+const (
+	BackfillProgressPercent    float64 = 0.6
+)
+
 // isAllowFastDDL is used to
 func isAllowFastDDL(storage kv.Storage) bool {
 	sessCtx := newContext(storage)
@@ -75,6 +79,8 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 			err = errors.Trace(err)
 		}
 	}
+	// After import local data into TiKV, then the progress set to 100.
+	metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(100)
 	return nil
 }
 
@@ -88,6 +94,29 @@ func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
 		}
 		lit.GlobalLightningEnv.LitMemRoot.DeleteBackendContext(bcKey)
 	}
+}
+
+// Flush data to local storage
+func flushData(jobId int64, indexIds int64) error {
+    return lit.FlushEngine(jobId, indexIds)
+}
+
+// Check if this reorg is a restore reorg task
+// Check if current lightning reorg task can be executed continuely.
+// Otherwise, restart the reorg task.
+func canRestoreReorgTask(reorg *reorgInfo, indexId int64) bool {
+	// The reorg just start, do nothing
+	if reorg.SnapshotVer == 0 {
+		return false
+	}
+
+	// Check if backend and engine are cached.
+	if !lit.CanRestoreReorgTask(reorg.ID, indexId) {
+        reorg.SnapshotVer = 0
+		reorg.IsLightningEnabled = true
+		return false
+	}
+	return true
 }
 
 // Below is lightning worker logic

@@ -599,14 +599,27 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 	// environment will be set up and then use reorgInfo.IsLightningok to show whether the lightning
 	// backfill used for specfic ddl job.
 	if isAllowFastDDL(reorgInfo.d.store) {
-		// init the flag, set IsLightningOk to false first.
-		reorgInfo.IsLightningEnabled = false
-		// If get tblInfo failed, go back to kernel backfill process.
-		if err == nil {
-			err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
-			// Once Env is created well, set IsLightningOk to true.
+		// Check if the reorg task is re-entry task, If TiDB is restarted, then currently
+		// reorg task should be restart.
+		if !canRestoreReorgTask(reorgInfo, indexInfo.ID) {
+			// Init the flag, set IsLightningOk to false first.
+			reorgInfo.IsLightningEnabled = false
+			// If get tblInfo failed, go back to kernel backfill process.
 			if err == nil {
-				reorgInfo.IsLightningEnabled = true
+				err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
+				// Once Env is created well, set IsLightningOk to true.
+				if err == nil {
+					reorgInfo.IsLightningEnabled = true
+				}
+			}
+		} else {
+			// If reorg task can be restored, regenerate a new reorgInfo.
+			reorgInfo, err = getReorgInfo(w.JobContext, d, t, job, tbl, elements)
+			reorgInfo.IsLightningEnabled = true
+			if err != nil || reorgInfo.first {
+				// If we run reorg firstly, we should update the job snapshot version
+				// and then run the reorg next time.
+				return false, ver, errors.Trace(err)
 			}
 		}
 	}
