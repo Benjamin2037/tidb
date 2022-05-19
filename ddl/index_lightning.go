@@ -31,6 +31,10 @@ import (
 	decoder "github.com/pingcap/tidb/util/rowDecoder"
 )
 
+const (
+	BackfillProgressPercent    float64 = 0.6
+)
+
 // isAllowFastDDL is used to
 func isAllowFastDDL(storage kv.Storage) bool {
 	sessCtx := newContext(storage)
@@ -75,6 +79,8 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 			err = errors.Trace(err)
 		}
 	}
+	// After import local data into TiKV, then the progress set to 100.
+	metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(100)
 	return nil
 }
 

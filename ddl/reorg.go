@@ -266,7 +266,12 @@ func (w *worker) runReorgJob(t *meta.Meta, reorgInfo *reorgInfo, tblInfo *model.
 
 		switch reorgInfo.Type {
 		case model.ActionAddIndex, model.ActionAddPrimaryKey:
+		// For lightning there is a part import should be counted.
+		if (reorgInfo.IsLightningEnabled) {
+			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(BackfillProgressPercent  * 100)
+		} else {
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(100)
+		}
 		case model.ActionModifyColumn:
 			metrics.GetBackfillProgressByLabel(metrics.LblModifyColumn).Set(100)
 		}
@@ -336,7 +341,13 @@ func updateBackfillProgress(w *worker, reorgInfo *reorgInfo, tblInfo *model.Tabl
 	}
 	switch reorgInfo.Type {
 	case model.ActionAddIndex, model.ActionAddPrimaryKey:
-		metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(progress * 100)
+		// For lightning there is a part import should be counted.
+		if (reorgInfo.IsLightningEnabled) {
+			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(BackfillProgressPercent * progress * 100)
+		} else {
+			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(progress * 100)
+		}
+
 	case model.ActionModifyColumn:
 		metrics.GetBackfillProgressByLabel(metrics.LblModifyColumn).Set(progress * 100)
 	}
