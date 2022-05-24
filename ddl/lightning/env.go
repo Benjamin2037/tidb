@@ -33,7 +33,7 @@ const (
 	_gb             = 1024 * _mb
 	flush_size      = 8 * _mb
 	diskQuota       = 512 * _mb
-
+	importThreadhold  float32 = 0.85
 	// 
 )
 type ClusterInfo struct {
@@ -147,4 +147,12 @@ func genLightningDataDir() string {
 	log.L().Info(LInfo_SORTED_DIR, zap.String("data path:", sortPath))
 	return sortPath
 }
+
+func (g *LightningEnv) NeedImportEngineData(UsedDisk int64) bool {
+	if UsedDisk > int64(importThreadhold * float32(g.diskQuota)) {
+		return true
+	}
+	return false
+}
+
 

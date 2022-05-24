@@ -725,6 +725,12 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 			zap.Int("regionCnt", len(kvRanges)),
 			zap.String("startHandle", tryDecodeToHandleString(startKey)),
 			zap.String("endHandle", tryDecodeToHandleString(endKey)))
+
+		// Disk quota checking and import data into TiKV if needed.
+		// Do lightning flush data to make checkpoint.
+		if importPartialDataToTiKV(job.ID, indexInfo.ID) != nil {
+			return errors.Trace(err)
+		}
 		remains, err := w.sendRangeTaskToWorkers(t, backfillWorkers, reorgInfo, &totalAddedCount, kvRanges)
 		if err != nil {
 			return errors.Trace(err)
@@ -733,8 +739,6 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 			break
 		}
 		startKey = remains[0].StartKey
-		// Do lightning flush data to make checkpoint.
-		err = flushData(reorgInfo.ID, indexInfo.ID)
 		if err != nil {
 			return errors.Trace(err)
 		}

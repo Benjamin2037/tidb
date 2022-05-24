@@ -382,4 +382,13 @@ func (m *LightningMemoryRoot) CaculateConcurrentDegree(workerCnt int) int {
 
 	m.currUsage += int64(size * units.MiB * uintptr(workerCnt))
 	return workerCnt
+}
+
+func (m *LightningMemoryRoot) TotalDiskUsage() int64 {
+	var totalDiskUsed    int64
+    for _, bc := range m.backendCache {
+		_, _, bcDiskUsed, _ :=bc.Backend.CheckDiskQuota(GlobalLightningEnv.diskQuota)
+		totalDiskUsed += bcDiskUsed
+	}
+	return totalDiskUsed
 } 

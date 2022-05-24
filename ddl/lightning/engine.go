@@ -17,6 +17,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
 	"github.com/pingcap/tidb/br/pkg/lightning/common"
@@ -38,6 +39,7 @@ type engineInfo struct {
 
 	backCtx      *BackendContext
 	openedEngine *backend.OpenedEngine
+	uuid         uuid.UUID
 	cfg          *backend.EngineConfig
 	tableName    string
 	WriterCount  int
@@ -79,6 +81,7 @@ func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engine
 		return errors.New(errMsg)
 	}
 	ei.Init(indexId, engineKey, &cfg, bc, en, job.TableName)
+	ei.uuid = ei.openedEngine.GetEngineUuid()
 	GlobalLightningEnv.LitMemRoot.EngineMgr.StoreEngineInfo(engineKey, ei)
 	bc.EngineCache[engineKey] = ei
     log.L().Info(LINFO_OPEN_ENGINE, 
@@ -165,18 +168,38 @@ func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, u
 	return nil
 }
 
-func FlushEngine(jobId int64,indexId int64) error {
-	engineKey := GenEngineInfoKey(jobId, indexId)
-	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineKey)
-	if err != nil {
-		return err
-	}
-    err = ei.openedEngine.Flush(ei.backCtx.Ctx)
+func FlushEngine(engineKey string, ei *engineInfo) error {
+    err := ei.openedEngine.Flush(ei.backCtx.Ctx)
 	if err != nil {
 		log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey))
 		return err
 	}
 	return nil
+}
+
+// Check if the disk quota arrived, if yes then ingest temp file into TiKV
+func UnsafeImportEngineData(jobId int64,indexId int64) error {
+	engineKey := GenEngineInfoKey(jobId, indexId)
+	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineKey)
+	if err != nil {
+		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine key:", engineKey))
+		return err
+	}
+	// Flush wirter cached data into local disk for engine first.
+    err = FlushEngine(engineKey, ei) 
+	if err != nil {
+		return err
+	}
+	totalDiskSize := GlobalLightningEnv.LitMemRoot.TotalDiskUsage()
+	if GlobalLightningEnv.NeedImportEngineData(totalDiskSize) {
+		err = ei.backCtx.Backend.UnsafeImportAndReset(ei.backCtx.Ctx, ei.uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
+	    if err != nil {
+			log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey),
+		        zap.String("import partial file failed, current disk storage consume", strconv.FormatInt(totalDiskSize, 10)))
+			return err
+		}
+	}
+    return nil
 }
 
 type WorkerContext struct {
