@@ -96,9 +96,9 @@ func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
 	}
 }
 
-// Flush data to local storage
-func flushData(jobId int64, indexIds int64) error {
-    return lit.FlushEngine(jobId, indexIds)
+// Disk quota checking and ingest data.
+func importPartialDataToTiKV(jobId int64, indexIds int64) error {
+	return lit.UnsafeImportEngineData(jobId, indexIds)
 }
 
 // Check if this reorg is a restore reorg task

@@ -510,3 +510,7 @@ type EngineWriter interface {
 	IsSynced() bool
 	Close(ctx context.Context) (ChunkFlushStatus, error)
 }
+
+func (oe *OpenedEngine) GetEngineUuid() uuid.UUID {
+	return oe.uuid
+}
