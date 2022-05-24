@@ -37,7 +37,7 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/table"
-	tablecontext "github.com/pingcap/tidb/table/tables/context"
+	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
@@ -73,8 +73,8 @@ func NewTableKVEncoder(tbl table.Table, options *SessionOptions) (Encoder, error
 	cols := tbl.Cols()
 	se := newSession(options)
 	// Set CommonAddRecordCtx to session to reuse the slices and BufStore in AddRecord
-	recordCtx := tablecontext.NewCommonAddRecordCtx(len(cols))
-	tablecontext.SetAddRecordCtx(se, recordCtx)
+	recordCtx := tables.NewCommonAddRecordCtx(len(cols))
+	tables.SetAddRecordCtx(se, recordCtx)
 
 	autoIDFn := func(id int64) int64 { return id }
 	if meta.PKIsHandle && meta.ContainsAutoRandomBits() {
