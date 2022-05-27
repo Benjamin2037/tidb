@@ -1438,8 +1438,10 @@ var defaultSysVars = []*SysVar{
 		s.MemQuotaQuery = TidbOptInt64(val, DefTiDBMemQuotaQuery)
 		return nil
 	}},
-	{Scope: ScopeGlobal, Name: TiDBFastDDL, Value: BoolToOnOff(DefTiDBFastDDL), Type: TypeBool, SetGlobal: func(s *SessionVars, val string) error {
-		s.TiDBFastDDL = TiDBOptOn(val)
+	{Scope: ScopeGlobal, Name: TiDBFastDDL, Value: BoolToOnOff(DefTiDBFastDDL), Type: TypeBool, GetGlobal: func(sv *SessionVars) (string, error) {
+		return BoolToOnOff(TiDBFastDDLVar.Load()), nil
+	}, SetGlobal: func(s *SessionVars, val string) error {
+		TiDBFastDDLVar.Store(TiDBOptOn(val))
 		return nil
 	}},
 }

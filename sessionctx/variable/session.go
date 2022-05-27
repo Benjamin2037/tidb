@@ -1034,9 +1034,6 @@ type SessionVars struct {
 
 	// MaxAllowedPacket indicates the maximum size of a packet for the MySQL protocol.
 	MaxAllowedPacket uint64
-
-	// TiDBFastDDL indicates whether to use lightning to enhance DDL reorg performance.
-	TiDBFastDDL bool
 }
 
 // InitStatementContext initializes a StatementContext, the object is reused to reduce allocation.

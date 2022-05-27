@@ -30,41 +30,41 @@ type BackendContext struct {
 	Backend     *backend.Backend
 	Ctx         context.Context
 	cfg         *config.Config
-	EngineCache map[string]*engineInfo
-	// Session level tidb glue
-	tidbGlue    *glue.ExternalTiDBGlue
-	sysVars     map[string]string
+	EngineCache map[string]engineInfo
+	sysVars  map[string]string
 }
 
-func (bc *BackendContext) init(k string, b *backend.Backend) {
-	bc.Key = k
-	bc.Backend = b
-	bc.EngineCache = make(map[string]*engineInfo)
+func newBackendContext(key string, be *backend.Backend, ctx context.Context, cfg *config.Config, vars map[string]string) *BackendContext {
+    return &BackendContext{
+		Key: key,
+		Backend: be,
+		Ctx: ctx,
+		cfg: cfg,
+		EngineCache: make(map[string]engineInfo, 10),
+		sysVars: vars,
+	}
 }
 
 func generateLightningConfig(ctx context.Context, unique bool, bcKey string) (*config.Config, error) {
 	cfg := config.NewConfig()
-	gCfg := config.NewGlobalConfig()
-	cfg.LoadFromGlobal(gCfg)
-
-    cfg.TikvImporter.Backend = config.BackendLocal
+	cfg.TikvImporter.Backend = config.BackendLocal
+	// Each backend will build an single dir in linghtning dir.
+	cfg.TikvImporter.SortedKVDir = GlobalLightningEnv.SortPath + bcKey + "/"
 	// Should not output err, after go through cfg.adjust function.
-	err :=cfg.Adjust(ctx)
+	_, err := cfg.AdjustCommon()
 	if err != nil {
 		log.L().Warn(LWAR_CONFIG_ERROR, zap.Error(err))
 		return nil, err
 	}
+	adjustImportMemory(cfg)
 	cfg.Checkpoint.Enable = true
-
-	// Each backend will build an single dir in linghtning dir.
-	cfg.TikvImporter.SortedKVDir = GlobalLightningEnv.SortPath + bcKey + "/"
 	if unique {
 		cfg.TikvImporter.DuplicateResolution = config.DupeResAlgRecord
 	} else {
 		cfg.TikvImporter.DuplicateResolution = config.DupeResAlgNone
 	}
-
 	cfg.TiDB.PdAddr = GlobalLightningEnv.PdAddr
+	cfg.TiDB.Host = "127.0.0.1"
 	cfg.TiDB.StatusPort = int(GlobalLightningEnv.Status)
 	return cfg, err
 }
@@ -75,7 +75,7 @@ func createLocalBackend(ctx context.Context, cfg *config.Config, glue glue.Glue)
 		log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.Error(err))
 		return backend.Backend{}, err
 	}
-    
+
 	return local.NewLocalBackend(ctx, tls, cfg, glue, int(GlobalLightningEnv.limit), nil)
 }
 
@@ -93,25 +93,26 @@ func adjustImportMemory(cfg *config.Config) {
 	var scale int64
 	defaultMemSize := int64(cfg.TikvImporter.LocalWriterMemCacheSize) * int64(cfg.TikvImporter.RangeConcurrency)
 	defaultMemSize += 4 * int64(cfg.TikvImporter.EngineMemCacheSize)
-    log.L().Info(LINFO_INIT_MEM_SETTING,
-	    zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+	log.L().Info(LINFO_INIT_MEM_SETTING,
+		zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
 		zap.String("EngineMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
-	    zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
+		zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
 
 	if defaultMemSize > GlobalLightningEnv.LitMemRoot.maxLimit {
 		scale = defaultMemSize / GlobalLightningEnv.LitMemRoot.maxLimit
 	}
-    
+
 	// scale equal to 1 means there is no need to adjust memory settings for lightning.
-	if scale == 1 {
+	// 0 means defaultMemSize is less than memory maxLimit for Lightning, no need to adjust.
+	if scale == 1 || scale == 0 {
 		return
 	}
 
 	cfg.TikvImporter.LocalWriterMemCacheSize /= config.ByteSize(scale)
 	cfg.TikvImporter.EngineMemCacheSize /= config.ByteSize(scale)
-    // ToDo adjust rangecourrency nubmer to control total concurrency in future.
+	// ToDo adjust rangecourrency nubmer to control total concurrency in future.
 	log.L().Info(LINFO_CHG_MEM_SETTING,
-	    zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
+		zap.String("LocalWriterMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
 		zap.String("EngineMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
 		zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
 	return

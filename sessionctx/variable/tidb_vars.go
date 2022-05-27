@@ -880,4 +880,6 @@ var (
 	StatsLoadPseudoTimeout                = atomic.NewBool(DefTiDBStatsLoadPseudoTimeout)
 	MemQuotaBindingCache                  = atomic.NewInt64(DefTiDBMemQuotaBindingCache)
 	GCMaxWaitTime                         = atomic.NewInt64(DefTiDBGCMaxWaitTime)
+	// TiDBFastDDL indicates whether to use lightning to enhance DDL reorg performance.
+	TiDBFastDDLVar                        = atomic.NewBool(false)
 )

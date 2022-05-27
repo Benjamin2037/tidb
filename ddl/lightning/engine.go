@@ -34,8 +34,8 @@ import (
 // Currently, one engine for one index reorg task, each task will create new writer under the
 // OpenEngine. Note engineInfo is not thread safe.
 type engineInfo struct {
-	id           int32
-	key          string
+	id  int32
+	key string
 
 	backCtx      *BackendContext
 	openedEngine *backend.OpenedEngine
@@ -46,23 +46,34 @@ type engineInfo struct {
 	writeCache   map[string]*backend.LocalEngineWriter
 }
 
-func (ei *engineInfo) Init(id int32, key string, cfg *backend.EngineConfig, bCtx *BackendContext, en *backend.OpenedEngine, tblName string) {
-	ei.id = id
-	ei.key = key
-	ei.cfg = cfg
-	ei.backCtx = bCtx
-	ei.openedEngine = en
-	ei.tableName = tblName
-	ei.writeCache = make(map[string]*backend.LocalEngineWriter)
+func NewEngineInfo(
+	id int32, key string, cfg *backend.EngineConfig, bCtx *BackendContext,
+	en *backend.OpenedEngine, tblName string, uuid uuid.UUID, wCnt int) *engineInfo {
+	ei := engineInfo{
+		id:           id,
+		key:          key,
+		cfg:          cfg,
+		backCtx:      bCtx,
+		openedEngine: en,
+		uuid:         uuid,
+		tableName:    tblName,
+		WriterCount:  wCnt,
+		writeCache:   make(map[string]*backend.LocalEngineWriter, wCnt),
+	}
+	return &ei
 }
 
 func GenEngineInfoKey(jobid int64, indexId int64) string {
-    return strconv.FormatInt(jobid, 10) + strconv.FormatInt(indexId, 10)
+	return strconv.FormatInt(jobid, 10) + strconv.FormatInt(indexId, 10)
 }
 
-func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engineKey string, indexId int32) (err error) {
-	ei := new(engineInfo)
-
+func CreateEngine(
+	ctx context.Context,
+	job *model.Job,
+	backendKey string,
+	engineKey string,
+	indexId int32,
+	wCnt int) (err error) {
 	var cfg backend.EngineConfig
 	cfg.Local = &backend.LocalEngineConfig{
 		Compact:            true,
@@ -80,11 +91,11 @@ func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engine
 		log.L().Error(errMsg)
 		return errors.New(errMsg)
 	}
-	ei.Init(indexId, engineKey, &cfg, bc, en, job.TableName)
-	ei.uuid = ei.openedEngine.GetEngineUuid()
+	uuid := en.GetEngineUuid()
+	ei := NewEngineInfo(indexId, engineKey, &cfg, bc, en, job.TableName, uuid, wCnt)
 	GlobalLightningEnv.LitMemRoot.EngineMgr.StoreEngineInfo(engineKey, ei)
-	bc.EngineCache[engineKey] = ei
-    log.L().Info(LINFO_OPEN_ENGINE, 
+	bc.EngineCache[engineKey] = *ei
+	log.L().Info(LINFO_OPEN_ENGINE,
 		zap.String("backend key", ei.backCtx.Key),
 		zap.String("Engine key", ei.key))
 	return nil
@@ -93,14 +104,14 @@ func CreateEngine(ctx context.Context, job *model.Job, backendKey string, engine
 func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, unique bool) (err error) {
 	var errMsg string
 	var keyMsg string
-	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
-	if err != nil {
-		return err
+	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
+	if !exist {
+		return errors.New(LERR_GET_ENGINE_FAILED)
 	}
 	defer func() {
 		GlobalLightningEnv.LitMemRoot.EngineMgr.ReleaseEngine(engineInfoKey)
 	}()
-    
+
 	keyMsg = "backend key:" + ei.backCtx.Key + "Engine key:" + ei.key
 	// Close engine
 	log.L().Info(LINFO_CLOSE_ENGINE, zap.String("backend key", ei.backCtx.Key), zap.String("Engine key", ei.key))
@@ -114,7 +125,7 @@ func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, u
 
 	// Local dupl check
 	if unique {
-        hasDupe, err := ei.backCtx.Backend.CollectLocalDuplicateRows(ctx, tbl, ei.tableName, &kv.SessionOptions{
+		hasDupe, err := ei.backCtx.Backend.CollectLocalDuplicateRows(ctx, tbl, ei.tableName, &kv.SessionOptions{
 			SQLMode: mysql.ModeStrictAllTables,
 			SysVars: ei.backCtx.sysVars,
 		})
@@ -131,7 +142,7 @@ func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, u
 
 	// Ingest data to TiKV
 	log.L().Info(LINFO_START_TO_IMPORT, zap.String("backend key", ei.backCtx.Key),
-	    zap.String("Engine key", ei.key),
+		zap.String("Engine key", ei.key),
 		zap.String("Split Region Size", strconv.FormatInt(int64(config.SplitRegionSize), 10)))
 	err = closeEngine.Import(ctx, int64(config.SplitRegionSize))
 	if err != nil {
@@ -169,7 +180,7 @@ func FinishIndexOp(ctx context.Context, engineInfoKey string, tbl table.Table, u
 }
 
 func FlushEngine(engineKey string, ei *engineInfo) error {
-    err := ei.openedEngine.Flush(ei.backCtx.Ctx)
+	err := ei.openedEngine.Flush(ei.backCtx.Ctx)
 	if err != nil {
 		log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey))
 		return err
@@ -178,67 +189,67 @@ func FlushEngine(engineKey string, ei *engineInfo) error {
 }
 
 // Check if the disk quota arrived, if yes then ingest temp file into TiKV
-func UnsafeImportEngineData(jobId int64,indexId int64) error {
+func UnsafeImportEngineData(jobId int64, indexId int64) error {
 	engineKey := GenEngineInfoKey(jobId, indexId)
-	ei, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineKey)
-	if err != nil {
+	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineKey)
+	if !exist {
 		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine key:", engineKey))
-		return err
+		return errors.New(LERR_GET_ENGINE_FAILED)
 	}
 	// Flush wirter cached data into local disk for engine first.
-    err = FlushEngine(engineKey, ei) 
+	err := FlushEngine(engineKey, ei)
 	if err != nil {
 		return err
 	}
 	totalDiskSize := GlobalLightningEnv.LitMemRoot.TotalDiskUsage()
 	if GlobalLightningEnv.NeedImportEngineData(totalDiskSize) {
 		err = ei.backCtx.Backend.UnsafeImportAndReset(ei.backCtx.Ctx, ei.uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
-	    if err != nil {
+		if err != nil {
 			log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey),
-		        zap.String("import partial file failed, current disk storage consume", strconv.FormatInt(totalDiskSize, 10)))
+				zap.String("import partial file failed, current disk storage consume", strconv.FormatInt(totalDiskSize, 10)))
 			return err
 		}
 	}
-    return nil
+	return nil
 }
 
 type WorkerContext struct {
-	eInfo     *engineInfo
-	lWrite    *backend.LocalEngineWriter
+	eInfo  *engineInfo
+	lWrite *backend.LocalEngineWriter
 }
 
 // Init Worker Context will get worker local writer from engine info writer cache first, if exist.
 // If local wirter not exist, then create new one and store it into engine info writer cache.
 // note operate ei.writeCache map is not thread safe please make sure there is sync mechaism to
 // make sure the safe.
-func (wCtx *WorkerContext)InitWorkerContext (engineKey string, workerid int) (err error) {
+func (wCtx *WorkerContext) InitWorkerContext(engineKey string, workerid int) (err error) {
 	wCtxKey := engineKey + strconv.Itoa(workerid)
-    
+
 	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.engineCache[engineKey]
-    
+
 	if !exist {
-		
+
 		return errors.New(LERR_GET_ENGINE_FAILED)
-	} 
-	wCtx.eInfo= ei;
+	}
+	wCtx.eInfo = ei
 
 	// Fisrt get local writer from engine cache.
 	wCtx.lWrite, exist = ei.writeCache[wCtxKey]
-	// If not exist then build one 
+	// If not exist then build one
 	if !exist {
-        wCtx.lWrite, err = ei.openedEngine.LocalWriter(ei.backCtx.Ctx, &backend.LocalWriterConfig{})
-	    if err != nil {
-		   return err
-	    }
-        // Cache the lwriter, here we do not lock, because this is called in mem root alloc
+		wCtx.lWrite, err = ei.openedEngine.LocalWriter(ei.backCtx.Ctx, &backend.LocalWriterConfig{})
+		if err != nil {
+			return err
+		}
+		// Cache the lwriter, here we do not lock, because this is called in mem root alloc
 		// process it will lock while alloc object.
-	    ei.writeCache[wCtxKey] = wCtx.lWrite
+		ei.writeCache[wCtxKey] = wCtx.lWrite
 	}
-    return nil
+	return nil
 }
 
-func (wCtx *WorkerContext)WriteRow(key, idxVal []byte, h tidbkv.Handle) {
-    var kvs []common.KvPair = make([]common.KvPair, 1, 1)
+func (wCtx *WorkerContext) WriteRow(key, idxVal []byte, h tidbkv.Handle) {
+	var kvs []common.KvPair = make([]common.KvPair, 1, 1)
 	kvs[0].Key = key
 	kvs[0].Val = idxVal
 	kvs[0].RowID = h.IntValue()
@@ -249,11 +260,11 @@ func (wCtx *WorkerContext)WriteRow(key, idxVal []byte, h tidbkv.Handle) {
 // otherwise return false to let reorg task restart.
 func CanRestoreReorgTask(jobId int64, indexId int64) bool {
 	engineInfoKey := GenEngineInfoKey(jobId, indexId)
-    bcKey := GenBackendContextKey(jobId)
-	_, err := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
-	_, err1 := GlobalLightningEnv.LitMemRoot.getBackendContext(bcKey)
-	if err != nil || !err1 {
-		return false
+	bcKey := GenBackendContextKey(jobId)
+	_, enExist := GlobalLightningEnv.LitMemRoot.EngineMgr.LoadEngineInfo(engineInfoKey)
+	_, bcExist := GlobalLightningEnv.LitMemRoot.getBackendContext(bcKey)
+	if enExist && bcExist {
+		return true
 	}
-	return true
+	return false
 }

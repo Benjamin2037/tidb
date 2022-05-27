@@ -14,8 +14,6 @@
 package lightning
 
 import (
-	"errors"
-
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	"go.uber.org/zap"
 )
@@ -25,7 +23,7 @@ type EngineManager struct {
 }
 
 func (em *EngineManager) init() {
-	em.engineCache = make(map[string]*engineInfo)
+	em.engineCache = make(map[string]*engineInfo, 10)
 }
 
 func (em *EngineManager) StoreEngineInfo(key string, ei *engineInfo) {
@@ -33,14 +31,14 @@ func (em *EngineManager) StoreEngineInfo(key string, ei *engineInfo) {
 
 }
 
-func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, error) {
+func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, bool) {
 	ei, exist := em.engineCache[key]
 	if !exist {
 		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine_Manager:", "Not found"))
-		return nil, errors.New(LERR_GET_ENGINE_FAILED)
+		return nil, exist
 	}
 
-	return ei, nil
+	return ei, exist
 }
 
 func (em *EngineManager) ReleaseEngine(key string) {

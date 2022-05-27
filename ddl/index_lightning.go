@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx"
+	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/types"
@@ -32,15 +33,14 @@ import (
 )
 
 const (
-	BackfillProgressPercent    float64 = 0.6
+	BackfillProgressPercent float64 = 0.6
 )
 
 // isAllowFastDDL is used to
-func isAllowFastDDL(storage kv.Storage) bool {
-	sessCtx := newContext(storage)
+func isAllowFastDDL() bool {
 	// Only when both TiDBFastDDL is set to on and Lightning env is inited successful,
-	// the add index could choose lightning path to do backfill procedure.   
-	if sessCtx.GetSessionVars().TiDBFastDDL && lit.GlobalLightningEnv.IsInited {
+	// the add index could choose lightning path to do backfill procedure.
+	if variable.TiDBFastDDLVar.Load() && lit.GlobalLightningEnv.IsInited {
 		return true
 	} else {
 		return false
@@ -84,7 +84,7 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 	return nil
 }
 
-// Used to clean backend, 
+// Used to clean backend,
 func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
 	if reorg.IsLightningEnabled {
 		bcKey := lit.GenBackendContextKey(reorg.ID)
@@ -112,7 +112,7 @@ func canRestoreReorgTask(reorg *reorgInfo, indexId int64) bool {
 
 	// Check if backend and engine are cached.
 	if !lit.CanRestoreReorgTask(reorg.ID, indexId) {
-        reorg.SnapshotVer = 0
+		reorg.SnapshotVer = 0
 		reorg.IsLightningEnabled = true
 		return false
 	}
@@ -122,7 +122,7 @@ func canRestoreReorgTask(reorg *reorgInfo, indexId int64) bool {
 // Below is lightning worker logic
 type addIndexWorkerLit struct {
 	addIndexWorker
-    
+
 	// Lightning related variable.
 	writerContex *lit.WorkerContext
 }
@@ -151,7 +151,7 @@ func newAddIndexWorkerLit(sessCtx sessionctx.Context, worker *worker, id int, t 
 			},
 			index: index,
 		},
-        writerContex: lwCtx,
+		writerContex: lwCtx,
 	}, err
 }
 
@@ -200,7 +200,7 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 				return errors.Trace(err)
 			}
 			// Currently, only use one kVCache, later may use multi kvCache to parallel compute/io performance.
-            w.writerContex.WriteRow(key, idxVal, idxRecord.handle)
+			w.writerContex.WriteRow(key, idxVal, idxRecord.handle)
 
 			taskCtx.addedCount++
 		}

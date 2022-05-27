@@ -669,10 +669,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 						backfillWorkers = append(backfillWorkers, idxWorker.backfillWorker)
 						go idxWorker.backfillWorker.run(reorgInfo.d, idxWorker, job)
 					}
-				}
-
-				// If there is any problem for lightning pass, then go back to kernel path.
-				if err != nil {
+				} else {
 					idxWorker := newAddIndexWorker(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode)
 					idxWorker.priority = job.Priority
 					backfillWorkers = append(backfillWorkers, idxWorker.backfillWorker)
@@ -728,9 +725,11 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 
 		// Disk quota checking and import data into TiKV if needed.
 		// Do lightning flush data to make checkpoint.
-		if importPartialDataToTiKV(job.ID, indexInfo.ID) != nil {
-			return errors.Trace(err)
-		}
+		if reorgInfo.IsLightningEnabled {
+			if importPartialDataToTiKV(job.ID, indexInfo.ID) != nil {
+				return errors.Trace(err)
+			}
+	    }
 		remains, err := w.sendRangeTaskToWorkers(t, backfillWorkers, reorgInfo, &totalAddedCount, kvRanges)
 		if err != nil {
 			return errors.Trace(err)

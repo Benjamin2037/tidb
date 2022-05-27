@@ -598,19 +598,16 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 	// TiDBFastDDL sysvars is true or false. If it is set to true, then the lightning execution
 	// environment will be set up and then use reorgInfo.IsLightningok to show whether the lightning
 	// backfill used for specfic ddl job.
-	if isAllowFastDDL(reorgInfo.d.store) {
+	if isAllowFastDDL() {
 		// Check if the reorg task is re-entry task, If TiDB is restarted, then currently
 		// reorg task should be restart.
 		if !canRestoreReorgTask(reorgInfo, indexInfo.ID) {
 			// Init the flag, set IsLightningOk to false first.
 			reorgInfo.IsLightningEnabled = false
-			// If get tblInfo failed, go back to kernel backfill process.
+			err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
+			// Once Env is created well, set IsLightningOk to true.
 			if err == nil {
-				err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
-				// Once Env is created well, set IsLightningOk to true.
-				if err == nil {
-					reorgInfo.IsLightningEnabled = true
-				}
+				reorgInfo.IsLightningEnabled = true
 			}
 		} else {
 			// If reorg task can be restored, regenerate a new reorgInfo.
@@ -647,7 +644,7 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		// others errors that occurs in reorg processing.
 		// For error that will rollback the add index statement, here only remove locale lightning
 		// files, other rollback process will follow add index roll back flow.
-        cleanUpLightningEnv(reorgInfo, true, indexInfo.ID)
+		cleanUpLightningEnv(reorgInfo, true, indexInfo.ID)
 		// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
 		w.reorgCtx.cleanNotifyReorgCancel()
 
