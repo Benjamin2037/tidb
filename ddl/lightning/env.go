@@ -15,6 +15,7 @@ package lightning
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -31,10 +32,9 @@ const (
 	_kb                      = 1024
 	_mb                      = 1024 * _kb
 	_gb                      = 1024 * _mb
-	flush_size               = 8 * _mb
+	flush_size               = 1 * _mb
 	diskQuota                = 512 * _mb
 	importThreadhold float32 = 0.85
-	//
 )
 
 type ClusterInfo struct {
@@ -73,7 +73,10 @@ func init() {
 }
 
 func InitGolbalLightningBackendEnv() {
-	var bufferSize uint64
+	var (
+		bufferSize uint64
+		err error
+	)
 	log.SetAppLogger(logutil.BgLogger())
 
 	cfg := config.GetGlobalConfig()
@@ -81,8 +84,8 @@ func InitGolbalLightningBackendEnv() {
 	GlobalLightningEnv.Status = cfg.Status.StatusPort
 	GlobalLightningEnv.PdAddr = cfg.Path
 
-	GlobalLightningEnv.SortPath = genLightningDataDir()
-	err := GlobalLightningEnv.parseDiskQuota()
+	GlobalLightningEnv.SortPath, err = genLightningDataDir()
+	err = GlobalLightningEnv.parseDiskQuota(int(variable.DiskQuota.Load()))
 	// Set Memory usage limitation to 1 GB
 	sbz := variable.GetSysVar("sort_buffer_size")
 	bufferSize, err = strconv.ParseUint(sbz.Value, 10, 64)
@@ -90,7 +93,7 @@ func InitGolbalLightningBackendEnv() {
 	// Otherwise, the ddl maxMemLimitation is 1 GB
 	if err == nil {
 		maxMemLimit = bufferSize * 4 * _kb
-		log.L().Info(LINFO_GEN_MEM_LIMIT,
+		log.L().Info(LINFO_SET_MEM_LIMIT,
 			zap.String("Memory limitation set to:", strconv.FormatUint(maxMemLimit, 10)))
 	} else {
 		log.L().Info(LWAR_GEN_MEM_LIMIT,
@@ -106,7 +109,7 @@ func InitGolbalLightningBackendEnv() {
 	return
 }
 
-func (l *LightningEnv) parseDiskQuota() error {
+func (l *LightningEnv) parseDiskQuota(val int) error {
 	sz, err := lcom.GetStorageSize(l.SortPath)
 	if err != nil {
 		log.L().Error(LERR_GET_STORAGE_QUOTA,
@@ -114,25 +117,31 @@ func (l *LightningEnv) parseDiskQuota() error {
 			zap.String("default disk quota", strconv.FormatInt(l.diskQuota, 10)))
 		return err
 	}
-	l.diskQuota = int64(sz.Available)
+    
+	setDiskValue := int64(val * _gb)
+	if setDiskValue > int64(sz.Available) {
+		l.diskQuota = int64(sz.Available)
+	} else {
+		l.diskQuota = setDiskValue
+	}
+	
 	return err
 }
 
 // Generate lightning local store dir in TiDB datadir.
-func genLightningDataDir() string {
+func genLightningDataDir() (string, error) {
 	dataDir := variable.GetSysVar(variable.DataDir)
-	var sortPath string = "/tmp/lightning/"
+	var sortPath string = "/tmp/lightning"
 	// If DataDir is not a dir path(strat with /), then set lightning to /tmp/lightning
-	if string(dataDir.Value[0]) == "/" {
-		sortPath = dataDir.Value + "/lightning/"
-	}
+	sortPath = filepath.Join(dataDir.Value, "/lightning")
 	shouldCreate := true
 	if info, err := os.Stat(sortPath); err != nil {
 		if !os.IsNotExist(err) {
 			log.L().Error(LERR_CREATE_DIR_FAILED, zap.String("Sort path:", sortPath),
 				zap.String("Error:", err.Error()))
-			return "/tmp/lightning/"
+			return "/tmp/lightning", err
 		}
+		
 	} else if info.IsDir() {
 		shouldCreate = false
 	}
@@ -142,11 +151,11 @@ func genLightningDataDir() string {
 		if err != nil {
 			log.L().Error(LERR_CREATE_DIR_FAILED, zap.String("Sort path:", sortPath),
 				zap.String("Error:", err.Error()))
-			return "/tmp/lightning/"
+			return "/tmp/lightning", err
 		}
 	}
 	log.L().Info(LInfo_SORTED_DIR, zap.String("data path:", sortPath))
-	return sortPath
+	return sortPath, nil
 }
 
 func (g *LightningEnv) NeedImportEngineData(UsedDisk int64) bool {

@@ -670,6 +670,7 @@ const (
 	TiDBRCReadCheckTS = "tidb_rc_read_check_ts"
 	// TiDBFastDDL indicates whether use lighting to help acceleate adding index stmt.
 	TiDBFastDDL = "tidb_fast_ddl"
+	TiDBDiskQuota = "tidb_disk_quota"
 )
 
 // TiDB intentional limits
@@ -844,6 +845,7 @@ const (
 	DefTiDBMemQuotaQuery                         = 1073741824 // 1GB
 	DefTiDBQueryLogMaxLen                        = 4096
 	DefTiDBFastDDL                               = false
+	DefTiDBDiskQuota                             = 100        // 100GB
 )
 
 // Process global variables.
@@ -881,5 +883,7 @@ var (
 	MemQuotaBindingCache                  = atomic.NewInt64(DefTiDBMemQuotaBindingCache)
 	GCMaxWaitTime                         = atomic.NewInt64(DefTiDBGCMaxWaitTime)
 	// TiDBFastDDL indicates whether to use lightning to enhance DDL reorg performance.
-	TiDBFastDDLVar                        = atomic.NewBool(false)
+	FastDDL                               = atomic.NewBool(false)
+	// Temporary Variable for set dist quota for lightning add index, int type, GB as unit
+    DiskQuota                             = atomic.NewInt32(100)
 )

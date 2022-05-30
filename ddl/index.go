@@ -594,30 +594,27 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		return false, ver, errors.Trace(err)
 	}
 
-	// Check and set up lightning Backend. Whether use lightning add index will depends on
-	// TiDBFastDDL sysvars is true or false. If it is set to true, then the lightning execution
-	// environment will be set up and then use reorgInfo.IsLightningok to show whether the lightning
-	// backfill used for specfic ddl job.
-	if isAllowFastDDL() {
-		// Check if the reorg task is re-entry task, If TiDB is restarted, then currently
-		// reorg task should be restart.
+	// If reorg task started already, now be here for restore previous execution.
+	if reorgInfo.Meta.IsLightningEnabled {
+		// If reorg task can not be restore with lightning execution, should restart reorg task to keep data consist.
 		if !canRestoreReorgTask(reorgInfo, indexInfo.ID) {
-			// Init the flag, set IsLightningOk to false first.
-			reorgInfo.IsLightningEnabled = false
-			err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
-			// Once Env is created well, set IsLightningOk to true.
-			if err == nil {
-				reorgInfo.IsLightningEnabled = true
-			}
-		} else {
-			// If reorg task can be restored, regenerate a new reorgInfo.
 			reorgInfo, err = getReorgInfo(w.JobContext, d, t, job, tbl, elements)
-			reorgInfo.IsLightningEnabled = true
 			if err != nil || reorgInfo.first {
-				// If we run reorg firstly, we should update the job snapshot version
-				// and then run the reorg next time.
 				return false, ver, errors.Trace(err)
 			}
+		}
+	}
+	
+	// Check and set up lightning Backend. Whether use lightning add index will depends on
+	// TiDBFastDDL sysvars is true or false at this time. Also if IsLightningEnabled mean 
+	// restore lightning reorg task, no need to init the lightning environment another time.
+	if IsAllowFastDDL() && !reorgInfo.Meta.IsLightningEnabled {
+		// Check if the reorg task is re-entry task, If TiDB is restarted, then currently
+		// reorg task should be restart.
+		err = prepareBackend(w.ctx, indexInfo.Unique, job, reorgInfo.ReorgMeta.SQLMode)
+		// Once Env is created well, set IsLightningOk to true.
+		if err == nil {
+			reorgInfo.Meta.IsLightningEnabled = true
 		}
 	}
 
@@ -651,7 +648,7 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 		return false, ver, errors.Trace(err)
 	}
 	// Ingest data to TiKV
-	importIndexDataToStore(w.ctx, reorgInfo, indexInfo.Unique, tbl)
+	importIndexDataToStore(w.ctx, reorgInfo, indexInfo.ID, indexInfo.Unique, tbl)
 
 	// Clean up the channel of notifyCancelReorgJob. Make sure it can't affect other jobs.
 	w.reorgCtx.cleanNotifyReorgCancel()

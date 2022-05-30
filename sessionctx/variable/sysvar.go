@@ -1439,9 +1439,22 @@ var defaultSysVars = []*SysVar{
 		return nil
 	}},
 	{Scope: ScopeGlobal, Name: TiDBFastDDL, Value: BoolToOnOff(DefTiDBFastDDL), Type: TypeBool, GetGlobal: func(sv *SessionVars) (string, error) {
-		return BoolToOnOff(TiDBFastDDLVar.Load()), nil
+		return BoolToOnOff(FastDDL.Load()), nil
 	}, SetGlobal: func(s *SessionVars, val string) error {
-		TiDBFastDDLVar.Store(TiDBOptOn(val))
+		FastDDL.Store(TiDBOptOn(val))
+		return nil
+	}},
+	// This system var is only used by developer tuning perpose.
+	{Scope: ScopeGlobal, Name: TiDBDiskQuota, Value: strconv.Itoa(DefTiDBDiskQuota), Type: TypeInt, MinValue: 0, MaxValue: math.MaxInt32, GetGlobal: func(sv *SessionVars) (string, error) {
+		return strconv.Itoa(int(DiskQuota.Load())), nil
+	}, SetGlobal: func(s *SessionVars, val string) error {
+		value, err := strconv.Atoi(val)
+		if err != nil {
+			DiskQuota.Store(int32(value))
+		} else {
+			// Set to default value.
+			DiskQuota.Store(DefTiDBDiskQuota)
+		}
 		return nil
 	}},
 }

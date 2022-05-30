@@ -344,16 +344,16 @@ func NewLocalBackend(
 	return backend.MakeBackend(local), nil
 }
 
-func (local *local)	TotalMemoryConsume() int64 {
+func (local *local) TotalMemoryConsume() int64 {
 	var memConsume int64 = 0
 	local.engines.Range(func(k, v interface{}) bool {
-		e := k.(*Engine)
+		e := v.(*Engine)
 		if e != nil {
 			memConsume += e.TotalMemorySize()
-		} 
+		}
 		return true
 	})
-	return memConsume     
+	return memConsume
 }
 
 func (local *local) checkMultiIngestSupport(ctx context.Context) error {

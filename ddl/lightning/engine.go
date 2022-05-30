@@ -31,7 +31,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Currently, one engine for one index reorg task, each task will create new writer under the
+var (
+	compactMem        int64 = 1 * _gb
+	compactConcurr    int = 4
+)
+
+// One engine for one index reorg task, each task will create new writer under the
 // OpenEngine. Note engineInfo is not thread safe.
 type engineInfo struct {
 	id  int32
@@ -43,7 +48,7 @@ type engineInfo struct {
 	cfg          *backend.EngineConfig
 	tableName    string
 	WriterCount  int
-	writeCache   map[string]*backend.LocalEngineWriter
+	writerCache   map[string]*backend.LocalEngineWriter
 }
 
 func NewEngineInfo(
@@ -58,7 +63,7 @@ func NewEngineInfo(
 		uuid:         uuid,
 		tableName:    tblName,
 		WriterCount:  wCnt,
-		writeCache:   make(map[string]*backend.LocalEngineWriter, wCnt),
+		writerCache:   make(map[string]*backend.LocalEngineWriter, wCnt),
 	}
 	return &ei
 }
@@ -77,10 +82,9 @@ func CreateEngine(
 	var cfg backend.EngineConfig
 	cfg.Local = &backend.LocalEngineConfig{
 		Compact:            true,
-		CompactThreshold:   1024 * _mb,
-		CompactConcurrency: 4,
+		CompactThreshold:   compactMem,
+		CompactConcurrency: compactConcurr,
 	}
-
 	// Open lightning engine
 	bc := GlobalLightningEnv.LitMemRoot.backendCache[backendKey]
 	be := bc.Backend
@@ -94,7 +98,7 @@ func CreateEngine(
 	uuid := en.GetEngineUuid()
 	ei := NewEngineInfo(indexId, engineKey, &cfg, bc, en, job.TableName, uuid, wCnt)
 	GlobalLightningEnv.LitMemRoot.EngineMgr.StoreEngineInfo(engineKey, ei)
-	bc.EngineCache[engineKey] = *ei
+	bc.EngineCache[engineKey] = ei
 	log.L().Info(LINFO_OPEN_ENGINE,
 		zap.String("backend key", ei.backCtx.Key),
 		zap.String("Engine key", ei.key))
@@ -203,7 +207,7 @@ func UnsafeImportEngineData(jobId int64, indexId int64) error {
 	}
 	totalDiskSize := GlobalLightningEnv.LitMemRoot.TotalDiskUsage()
 	if GlobalLightningEnv.NeedImportEngineData(totalDiskSize) {
-		err = ei.backCtx.Backend.UnsafeImportAndReset(ei.backCtx.Ctx, ei.uuid, int64(config.SplitRegionSize)*int64(config.MaxSplitRegionSizeRatio))
+		err = ei.backCtx.Backend.UnsafeImportAndReset(ei.backCtx.Ctx, ei.uuid, int64(config.SplitRegionSize) * int64(config.MaxSplitRegionSizeRatio))
 		if err != nil {
 			log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey),
 				zap.String("import partial file failed, current disk storage consume", strconv.FormatInt(totalDiskSize, 10)))
@@ -224,17 +228,14 @@ type WorkerContext struct {
 // make sure the safe.
 func (wCtx *WorkerContext) InitWorkerContext(engineKey string, workerid int) (err error) {
 	wCtxKey := engineKey + strconv.Itoa(workerid)
-
-	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.engineCache[engineKey]
-
+	ei, exist := GlobalLightningEnv.LitMemRoot.EngineMgr.enginePool[engineKey]
 	if !exist {
-
 		return errors.New(LERR_GET_ENGINE_FAILED)
 	}
 	wCtx.eInfo = ei
 
 	// Fisrt get local writer from engine cache.
-	wCtx.lWrite, exist = ei.writeCache[wCtxKey]
+	wCtx.lWrite, exist = ei.writerCache[wCtxKey]
 	// If not exist then build one
 	if !exist {
 		wCtx.lWrite, err = ei.openedEngine.LocalWriter(ei.backCtx.Ctx, &backend.LocalWriterConfig{})
@@ -243,7 +244,7 @@ func (wCtx *WorkerContext) InitWorkerContext(engineKey string, workerid int) (er
 		}
 		// Cache the lwriter, here we do not lock, because this is called in mem root alloc
 		// process it will lock while alloc object.
-		ei.writeCache[wCtxKey] = wCtx.lWrite
+		ei.writerCache[wCtxKey] = wCtx.lWrite
 	}
 	return nil
 }

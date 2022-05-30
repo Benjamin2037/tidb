@@ -19,38 +19,36 @@ import (
 )
 
 type EngineManager struct {
-	engineCache map[string]*engineInfo
+	enginePool map[string]*engineInfo
 }
 
 func (em *EngineManager) init() {
-	em.engineCache = make(map[string]*engineInfo, 10)
+	em.enginePool = make(map[string]*engineInfo, 10)
 }
 
 func (em *EngineManager) StoreEngineInfo(key string, ei *engineInfo) {
-	em.engineCache[key] = ei
-
+	em.enginePool[key] = ei
 }
 
 func (em *EngineManager) LoadEngineInfo(key string) (*engineInfo, bool) {
-	ei, exist := em.engineCache[key]
+	ei, exist := em.enginePool[key]
 	if !exist {
 		log.L().Error(LERR_GET_ENGINE_FAILED, zap.String("Engine_Manager:", "Not found"))
 		return nil, exist
 	}
-
 	return ei, exist
 }
 
 func (em *EngineManager) ReleaseEngine(key string) {
 	log.L().Info(LINFO_ENGINE_DELETE, zap.String("Engine info key:", key))
-	delete(em.engineCache, key)
+	delete(em.enginePool, key)
 	return
 }
 
-// TotalSize funcation cacluation from engine perspect.
+// Caculate all memory used by all active engine.
 func (em *EngineManager) totalSize() int64 {
 	var memUsed int64
-	for _, en := range em.engineCache {
+	for _, en := range em.enginePool {
 		memUsed += en.openedEngine.TotalMemoryConsume()
 	}
 	return memUsed

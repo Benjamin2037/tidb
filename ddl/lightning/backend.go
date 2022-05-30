@@ -15,13 +15,18 @@ package lightning
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"strconv"
 
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/local"
+	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/br/pkg/lightning/glue"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/parser/model"
 	"go.uber.org/zap"
 )
 
@@ -30,8 +35,8 @@ type BackendContext struct {
 	Backend     *backend.Backend
 	Ctx         context.Context
 	cfg         *config.Config
-	EngineCache map[string]engineInfo
-	sysVars  map[string]string
+	EngineCache map[string]*engineInfo
+	sysVars     map[string]string
 }
 
 func newBackendContext(key string, be *backend.Backend, ctx context.Context, cfg *config.Config, vars map[string]string) *BackendContext {
@@ -40,7 +45,7 @@ func newBackendContext(key string, be *backend.Backend, ctx context.Context, cfg
 		Backend: be,
 		Ctx: ctx,
 		cfg: cfg,
-		EngineCache: make(map[string]engineInfo, 10),
+		EngineCache: make(map[string]*engineInfo, 10),
 		sysVars: vars,
 	}
 }
@@ -49,7 +54,7 @@ func generateLightningConfig(ctx context.Context, unique bool, bcKey string) (*c
 	cfg := config.NewConfig()
 	cfg.TikvImporter.Backend = config.BackendLocal
 	// Each backend will build an single dir in linghtning dir.
-	cfg.TikvImporter.SortedKVDir = GlobalLightningEnv.SortPath + bcKey + "/"
+	cfg.TikvImporter.SortedKVDir = filepath.Join(GlobalLightningEnv.SortPath, bcKey)
 	// Should not output err, after go through cfg.adjust function.
 	_, err := cfg.AdjustCommon()
 	if err != nil {
@@ -89,6 +94,7 @@ func GenBackendContextKey(jobId int64) string {
 	return strconv.FormatInt(jobId, 10)
 }
 
+// Adjust lightning memory parameters according memory root's max limitation
 func adjustImportMemory(cfg *config.Config) {
 	var scale int64
 	defaultMemSize := int64(cfg.TikvImporter.LocalWriterMemCacheSize) * int64(cfg.TikvImporter.RangeConcurrency)
@@ -116,4 +122,33 @@ func adjustImportMemory(cfg *config.Config) {
 		zap.String("EngineMemCacheSize:", strconv.FormatInt(int64(cfg.TikvImporter.LocalWriterMemCacheSize), 10)),
 		zap.String("rangecounrrency:", strconv.Itoa(cfg.TikvImporter.RangeConcurrency)))
 	return
+}
+
+type glue_lit struct{}
+
+func (_ glue_lit) OwnsSQLExecutor() bool {
+	return false
+}
+func (_ glue_lit) GetSQLExecutor() glue.SQLExecutor {
+	return nil
+}
+func (_ glue_lit) GetDB() (*sql.DB, error) {
+	return nil, nil
+}
+func (_ glue_lit) GetParser() *parser.Parser {
+	return nil
+}
+func (_ glue_lit) GetTables(context.Context, string) ([]*model.TableInfo, error) {
+	return nil, nil
+}
+func (_ glue_lit) GetSession(context.Context) (checkpoints.Session, error) {
+	return nil, nil
+}
+func (_ glue_lit) OpenCheckpointsDB(context.Context, *config.Config) (checkpoints.DB, error) {
+	return nil, nil
+}
+
+// Record is used to report some information (key, value) to host TiDB, including progress, stage currently
+func (_ glue_lit) Record(string, uint64) {
+
 }

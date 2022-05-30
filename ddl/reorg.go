@@ -267,7 +267,7 @@ func (w *worker) runReorgJob(t *meta.Meta, reorgInfo *reorgInfo, tblInfo *model.
 		switch reorgInfo.Type {
 		case model.ActionAddIndex, model.ActionAddPrimaryKey:
 		// For lightning there is a part import should be counted.
-		if (reorgInfo.IsLightningEnabled) {
+		if (reorgInfo.Meta.IsLightningEnabled) {
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(BackfillProgressPercent  * 100)
 		} else {
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(100)
@@ -342,7 +342,7 @@ func updateBackfillProgress(w *worker, reorgInfo *reorgInfo, tblInfo *model.Tabl
 	switch reorgInfo.Type {
 	case model.ActionAddIndex, model.ActionAddPrimaryKey:
 		// For lightning there is a part import should be counted.
-		if (reorgInfo.IsLightningEnabled) {
+		if (reorgInfo.Meta.IsLightningEnabled) {
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(BackfillProgressPercent * progress * 100)
 		} else {
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(progress * 100)
@@ -410,7 +410,12 @@ type reorgInfo struct {
 	PhysicalTableID int64
 	elements        []*meta.Element
 	currElement     *meta.Element
+    
+	// Extend meta information for reorg task.
+	Meta reorgMeta
+}
 
+type reorgMeta struct {
 	// Mark whether the lightning execution environment is built or not
 	IsLightningEnabled bool
 }
@@ -422,7 +427,7 @@ func (r *reorgInfo) String() string {
 		"EndHandle:" + tryDecodeToHandleString(r.EndKey) + "," +
 		"First:" + strconv.FormatBool(r.first) + "," +
 		"PhysicalTableID:" + strconv.FormatInt(r.PhysicalTableID, 10) + "," +
-		"Lightning execution:" + strconv.FormatBool(r.IsLightningEnabled)
+		"Lightning execution:" + strconv.FormatBool(r.Meta.IsLightningEnabled)
 }
 
 func constructDescTableScanPB(physicalTableID int64, tblInfo *model.TableInfo, handleCols []*model.ColumnInfo) *tipb.Executor {
@@ -661,6 +666,8 @@ func getReorgInfo(ctx *JobContext, d *ddlCtx, t *meta.Meta, job *model.Job, tbl 
 		// Update info should after data persistent.
 		job.SnapshotVer = ver.Ver
 		element = elements[0]
+		// Init reorgInfo meta.
+		info.Meta.IsLightningEnabled = false
 	} else {
 		failpoint.Inject("MockGetIndexRecordErr", func(val failpoint.Value) {
 			// For the case of the old TiDB version(do not exist the element information) is upgraded to the new TiDB version.

@@ -36,11 +36,11 @@ const (
 	BackfillProgressPercent float64 = 0.6
 )
 
-// isAllowFastDDL is used to
-func isAllowFastDDL() bool {
+// Whether Fast DDl is allowed.
+func IsAllowFastDDL() bool {
 	// Only when both TiDBFastDDL is set to on and Lightning env is inited successful,
 	// the add index could choose lightning path to do backfill procedure.
-	if variable.TiDBFastDDLVar.Load() && lit.GlobalLightningEnv.IsInited {
+	if variable.FastDDL.Load() && lit.GlobalLightningEnv.IsInited {
 		return true
 	} else {
 		return false
@@ -70,9 +70,9 @@ func prepareLightningEngine(job *model.Job, indexId int64, workerCnt int) (wCnt 
 }
 
 // Import local index sst file into TiKV.
-func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, tbl table.Table) error {
-	if reorg.IsLightningEnabled {
-		engineInfoKey := lit.GenEngineInfoKey(reorg.ID, 0)
+func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, indexId int64, unique bool, tbl table.Table) error {
+	if reorg.Meta.IsLightningEnabled {
+		engineInfoKey := lit.GenEngineInfoKey(reorg.ID, indexId)
 		// just log info.
 		err := lit.FinishIndexOp(ctx, engineInfoKey, tbl, unique)
 		if err != nil {
@@ -86,7 +86,7 @@ func importIndexDataToStore(ctx context.Context, reorg *reorgInfo, unique bool, 
 
 // Used to clean backend,
 func cleanUpLightningEnv(reorg *reorgInfo, isCanceled bool, indexIds ...int64) {
-	if reorg.IsLightningEnabled {
+	if reorg.Meta.IsLightningEnabled {
 		bcKey := lit.GenBackendContextKey(reorg.ID)
 		// If reorg is cancled, need do clean up engine.
 		if isCanceled {
@@ -113,7 +113,6 @@ func canRestoreReorgTask(reorg *reorgInfo, indexId int64) bool {
 	// Check if backend and engine are cached.
 	if !lit.CanRestoreReorgTask(reorg.ID, indexId) {
 		reorg.SnapshotVer = 0
-		reorg.IsLightningEnabled = true
 		return false
 	}
 	return true

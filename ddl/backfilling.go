@@ -602,10 +602,10 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 	// if litWorkerCnt is 0 or err exist, means not good for lightning execution, 
 	// then go back use kernel way to reorg index.
 	var litWorkerCnt int
-	if reorgInfo.IsLightningEnabled {
+	if reorgInfo.Meta.IsLightningEnabled {
 		litWorkerCnt, err = prepareLightningEngine(job, indexInfo.ID, int(workerCnt))
 		if err != nil || litWorkerCnt == 0 {
-			reorgInfo.IsLightningEnabled = false
+			reorgInfo.Meta.IsLightningEnabled = false
 		} else {
 			if workerCnt > int32(litWorkerCnt) {
 				workerCnt = int32(litWorkerCnt)
@@ -634,7 +634,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 			workerCnt = int32(len(kvRanges))
 		}
 
-		if reorgInfo.IsLightningEnabled && workerCnt > int32(litWorkerCnt) {
+		if reorgInfo.Meta.IsLightningEnabled && workerCnt > int32(litWorkerCnt) {
 			workerCnt = int32(litWorkerCnt)
 		}
 
@@ -662,7 +662,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 			switch bfWorkerType {
 			case typeAddIndexWorker:
 				// Firstly, check and try lightning path
-				if reorgInfo.IsLightningEnabled {
+				if reorgInfo.Meta.IsLightningEnabled {
 					idxWorker, err := newAddIndexWorkerLit(sessCtx, w, i, t, indexInfo, decodeColMap, reorgInfo.ReorgMeta.SQLMode, job.ID)
 					if err == nil {
 						idxWorker.priority = job.Priority
@@ -725,7 +725,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 
 		// Disk quota checking and import data into TiKV if needed.
 		// Do lightning flush data to make checkpoint.
-		if reorgInfo.IsLightningEnabled {
+		if reorgInfo.Meta.IsLightningEnabled {
 			if importPartialDataToTiKV(job.ID, indexInfo.ID) != nil {
 				return errors.Trace(err)
 			}
