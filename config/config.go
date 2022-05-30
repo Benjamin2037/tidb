@@ -80,6 +80,8 @@ const (
 	DefExpensiveQueryTimeThreshold = 60
 	// DefMemoryUsageAlarmRatio is the threshold triggering an alarm which the memory usage of tidb-server instance exceeds.
 	DefMemoryUsageAlarmRatio = 0.8
+	// DefLightningSortPath is the default sort dir for add index lightning solution
+	DefLightningSortPath = ""
 )
 
 // Valid config maps

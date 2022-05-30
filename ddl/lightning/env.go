@@ -32,6 +32,8 @@ const (
 	_kb                      = 1024
 	_mb                      = 1024 * _kb
 	_gb                      = 1024 * _mb
+	_tb                      = 1024 * _gb
+	_pb                      = 1024 * _tb
 	flush_size               = 1 * _mb
 	diskQuota                = 512 * _mb
 	importThreadhold float32 = 0.85
@@ -84,7 +86,7 @@ func InitGolbalLightningBackendEnv() {
 	GlobalLightningEnv.Status = cfg.Status.StatusPort
 	GlobalLightningEnv.PdAddr = cfg.Path
 
-	GlobalLightningEnv.SortPath, err = genLightningDataDir()
+	GlobalLightningEnv.SortPath, err = genLightningDataDir(cfg.LightningSortPath)
 	err = GlobalLightningEnv.parseDiskQuota(int(variable.DiskQuota.Load()))
 	// Set Memory usage limitation to 1 GB
 	sbz := variable.GetSysVar("sort_buffer_size")
@@ -119,6 +121,7 @@ func (l *LightningEnv) parseDiskQuota(val int) error {
 	}
     
 	setDiskValue := int64(val * _gb)
+	// The Dist quota should be 100 GB to 1 PB
 	if setDiskValue > int64(sz.Available) {
 		l.diskQuota = int64(sz.Available)
 	} else {
@@ -129,11 +132,8 @@ func (l *LightningEnv) parseDiskQuota(val int) error {
 }
 
 // Generate lightning local store dir in TiDB datadir.
-func genLightningDataDir() (string, error) {
-	dataDir := variable.GetSysVar(variable.DataDir)
-	var sortPath string = "/tmp/lightning"
-	// If DataDir is not a dir path(strat with /), then set lightning to /tmp/lightning
-	sortPath = filepath.Join(dataDir.Value, "/lightning")
+func genLightningDataDir(sortPath string) (string, error) {
+	sortPath = filepath.Join(sortPath, "/lightning")
 	shouldCreate := true
 	if info, err := os.Stat(sortPath); err != nil {
 		if !os.IsNotExist(err) {
@@ -141,7 +141,6 @@ func genLightningDataDir() (string, error) {
 				zap.String("Error:", err.Error()))
 			return "/tmp/lightning", err
 		}
-		
 	} else if info.IsDir() {
 		shouldCreate = false
 	}

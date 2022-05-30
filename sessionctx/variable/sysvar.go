@@ -1444,8 +1444,8 @@ var defaultSysVars = []*SysVar{
 		FastDDL.Store(TiDBOptOn(val))
 		return nil
 	}},
-	// This system var is only used by developer tuning perpose.
-	{Scope: ScopeGlobal, Name: TiDBDiskQuota, Value: strconv.Itoa(DefTiDBDiskQuota), Type: TypeInt, MinValue: 0, MaxValue: math.MaxInt32, GetGlobal: func(sv *SessionVars) (string, error) {
+	// This system var is set disk quota for lightning sort dir, from 100 GB to 1PB.
+	{Scope: ScopeGlobal, Name: TiDBDiskQuota, Value: strconv.Itoa(DefTiDBDiskQuota), Type: TypeInt, MinValue: 100, MaxValue: 1048576, GetGlobal: func(sv *SessionVars) (string, error) {
 		return strconv.Itoa(int(DiskQuota.Load())), nil
 	}, SetGlobal: func(s *SessionVars, val string) error {
 		value, err := strconv.Atoi(val)

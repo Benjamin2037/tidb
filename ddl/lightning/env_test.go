@@ -17,7 +17,6 @@ package lightning
 import (
 	"testing"
 
-	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,10 +33,11 @@ func TestGenSortPath(t *testing.T) {
 		{"path4", "~/data1/", "/tmp/lightning"},
 		{"path5", "../data1/", "/tmp/lightning"},
 		{"path6", "/data/tidb/data/", "/data/tidb/data/lightning"},
+		{"path7", "", "/data/tidb/data/lightning"},
+		{"path8", "/lightning", "/lightning"},
 	}
 	for _, test := range tests {
-		variable.SetSysVar(variable.DataDir, test.inputPath)
-		result, err := genLightningDataDir()
+		result, err := genLightningDataDir(test.inputPath)
 		if err == nil {
 			require.Equal(t, test.outputPath, result)
 		} else {
@@ -60,10 +60,11 @@ func TestSetDiskQuota(t *testing.T) {
 		{"quota4", "~/data1/", 512, 512 * _gb},
 		{"quota5", "../data1/", 10000, 10000 * _gb},
 		{"quota6", "/data/tidb/data/", 100000, 100000 * _gb},
+		{"quota7", "", 10000, 10000 * _gb},
+		{"quota8", "/lightning", 10000, 10000 * _gb},
 	}
 	for _, test := range tests {
-		variable.SetSysVar(variable.DataDir, test.sortPath)
-		result, _ := genLightningDataDir()
+		result, _ := genLightningDataDir(test.sortPath)
 		GlobalLightningEnv.SortPath = result
 		GlobalLightningEnv.parseDiskQuota(test.inputQuota)
 		if GlobalLightningEnv.diskQuota > int64(test.inputQuota * _gb) {
