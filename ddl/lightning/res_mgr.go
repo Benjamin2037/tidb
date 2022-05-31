@@ -59,8 +59,8 @@ type LightningMemoryRoot struct {
 
 func (m *LightningMemoryRoot) init(maxMemUsage int64) {
 	// Set lightning memory quota to 2 times flush_size
-	if maxMemUsage < 2*flush_size {
-		m.maxLimit = 2 * flush_size
+	if maxMemUsage < flush_size {
+		m.maxLimit = flush_size
 	} else {
 		m.maxLimit = maxMemUsage
 	}
@@ -119,7 +119,7 @@ func (m *LightningMemoryRoot) checkMemoryUsage(t defaultType) error {
 		return errors.New(LERR_UNKNOW_MEM_TYPE)
 	}
 
-	if m.currUsage+requiredMem > m.maxLimit {
+	if m.currUsage + requiredMem > m.maxLimit {
 		return errors.New(LERR_OUT_OF_MAX_MEM)
 	}
 	return nil
@@ -275,7 +275,9 @@ func (m *LightningMemoryRoot) RegistEngineInfo(job *model.Job, bcKey string, eng
 	log.L().Info(LINFO_OPEN_ENGINE, zap.String("backend key", bcKey),
 		zap.String("Engine key", engineKey),
 		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
-		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)),
+	    zap.String("Expected Worker Count", strconv.Itoa(workerCount)),
+		zap.String("Allocated worker count", strconv.Itoa(newWorkerCount)))
 	return newWorkerCount, nil
 }
 
