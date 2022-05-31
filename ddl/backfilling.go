@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/tidb/store/copr"
 	"github.com/pingcap/tidb/store/driver/backoff"
 	"github.com/pingcap/tidb/table"
+	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/dbterror"
@@ -528,6 +529,39 @@ func loadDDLReorgVars(w *worker) error {
 	return ddlutil.LoadDDLReorgVars(w.ddlJobCtx, ctx)
 }
 
+func pruneDecodeColMap(colMap map[int64]decoder.Column, t table.Table, indexInfo *model.IndexInfo) map[int64]decoder.Column {
+	resultMap := make(map[int64]decoder.Column)
+	virtualGeneratedColumnStack := make([]*model.ColumnInfo, 0)
+	for _, idxCol := range indexInfo.Columns {
+		if isVirtualGeneratedColumn(t.Meta().Columns[idxCol.Offset]) {
+			virtualGeneratedColumnStack = append(virtualGeneratedColumnStack, t.Meta().Columns[idxCol.Offset])
+		}
+		resultMap[t.Meta().Columns[idxCol.Offset].ID] = colMap[t.Meta().Columns[idxCol.Offset].ID]
+	}
+	if t.Meta().IsCommonHandle {
+		for _, pkCol := range tables.TryGetCommonPkColumns(t) {
+			resultMap[pkCol.ID] = colMap[pkCol.ID]
+		}
+	} else if t.Meta().PKIsHandle {
+		pkCol := t.Meta().GetPkColInfo()
+		resultMap[pkCol.ID] = colMap[pkCol.ID]
+	}
+
+	for len(virtualGeneratedColumnStack) > 0 {
+		checkCol := virtualGeneratedColumnStack[0]
+		for dColName := range checkCol.Dependences {
+			col := model.FindColumnInfo(t.Meta().Columns, dColName)
+			if isVirtualGeneratedColumn(col) {
+				virtualGeneratedColumnStack = append(virtualGeneratedColumnStack, col)
+			}
+			resultMap[col.ID] = colMap[col.ID]
+		}
+		virtualGeneratedColumnStack = virtualGeneratedColumnStack[1:]
+	}
+
+	return resultMap
+}
+
 func makeupDecodeColMap(sessCtx sessionctx.Context, t table.Table) (map[int64]decoder.Column, error) {
 	dbName := model.NewCIStr(sessCtx.GetSessionVars().CurrentDB)
 	writableColInfos := make([]*model.ColumnInfo, 0, len(t.WritableCols()))
@@ -581,6 +615,10 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 	decodeColMap, err := makeupDecodeColMap(sessCtx, t)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	if indexInfo != nil {
+		decodeColMap = pruneDecodeColMap(decodeColMap, t, indexInfo)
 	}
 
 	if err := w.isReorgRunnable(reorgInfo.d); err != nil {
