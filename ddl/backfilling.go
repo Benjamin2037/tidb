@@ -635,7 +635,12 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 		}
 
 		if reorgInfo.Meta.IsLightningEnabled && workerCnt > int32(litWorkerCnt) {
-			workerCnt = int32(litWorkerCnt)
+			count, err := prepareLightningEngine(job, indexInfo.ID, int(workerCnt - int32(litWorkerCnt)))
+		    if err != nil || count == 0 {
+				workerCnt = int32(litWorkerCnt)
+			} else {
+				workerCnt = int32(litWorkerCnt + count)
+			}
 		}
 
 		// Enlarge the worker size.

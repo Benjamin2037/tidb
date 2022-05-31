@@ -38,6 +38,7 @@ const (
 	LWAR_BACKEND_NOT_EXIST     string = "Lightning: Backend not exist"
 	LWAR_CONFIG_ERROR          string = "Lightning: Build config for backend failed"
 	LWAR_GEN_MEM_LIMIT         string = "Lightning: Generate memory max limitation"
+	LWAR_EXTENT_WORKER         string = "Lightning: Extend worker failed will use worker count number worker to keep doing backfill task "
 	// Infomation messages
 	LInfo_ENV_INIT_SUCC        string = "Lightning: Init global lightning backend environment finished"
 	LInfo_SORTED_DIR           string = "Lightning: The lightning sorted dir"

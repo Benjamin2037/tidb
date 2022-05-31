@@ -30,9 +30,11 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"go.uber.org/zap"
 )
-type defaultType   string
+
+type defaultType string
+
 const (
-	// Default struct need to be count. 
+	// Default struct need to be count.
 	ALLOC_BACKEND_CONTEXT defaultType = "AllocBackendContext"
 	ALLOC_ENGINE_INFO     defaultType = "AllocEngineInfo"
 	ALLOC_WORKER_CONTEXT  defaultType = "AllocWorkerCONTEXT"
@@ -57,7 +59,7 @@ type LightningMemoryRoot struct {
 
 func (m *LightningMemoryRoot) init(maxMemUsage int64) {
 	// Set lightning memory quota to 2 times flush_size
-	if maxMemUsage < 2 * flush_size {
+	if maxMemUsage < 2*flush_size {
 		m.maxLimit = 2 * flush_size
 	} else {
 		m.maxLimit = maxMemUsage
@@ -70,17 +72,17 @@ func (m *LightningMemoryRoot) init(maxMemUsage int64) {
 	m.backendCache = make(map[string]*BackendContext, 10)
 	m.EngineMgr.init()
 	m.structSize = make(map[string]int64, 10)
-    m.initDefaultStruceMemSize()
+	m.initDefaultStruceMemSize()
 }
 
 // Caculate memory struct size and save it into map.
 func (m *LightningMemoryRoot) initDefaultStruceMemSize() {
 	var (
-		bc BackendContext
-		ei engineInfo
+		bc   BackendContext
+		ei   engineInfo
 		wCtx WorkerContext
 	)
-    
+
 	m.structSize[string(ALLOC_BACKEND_CONTEXT)] = int64(unsafe.Sizeof(bc))
 	m.structSize[string(ALLOC_ENGINE_INFO)] = int64(unsafe.Sizeof(ei))
 	m.structSize[string(ALLOC_WORKER_CONTEXT)] = int64(unsafe.Sizeof(wCtx))
@@ -101,7 +103,7 @@ func (m *LightningMemoryRoot) Reset(maxMemUsage int64) {
 }
 
 // Check Memory allocated for lightning.
-func (m *LightningMemoryRoot) checkMemoryUsage(t defaultType)  error {
+func (m *LightningMemoryRoot) checkMemoryUsage(t defaultType) error {
 	var (
 		requiredMem int64 = 0
 	)
@@ -117,7 +119,7 @@ func (m *LightningMemoryRoot) checkMemoryUsage(t defaultType)  error {
 		return errors.New(LERR_UNKNOW_MEM_TYPE)
 	}
 
-	if m.currUsage + requiredMem > m.maxLimit {
+	if m.currUsage+requiredMem > m.maxLimit {
 		return errors.New(LERR_OUT_OF_MAX_MEM)
 	}
 	return nil
@@ -126,10 +128,10 @@ func (m *LightningMemoryRoot) checkMemoryUsage(t defaultType)  error {
 // check and create one backend
 func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique bool, key string, sqlMode mysql.SQLMode) error {
 	var (
-		err        error = nil
-		bd         backend.Backend
-		exist      bool = false
-		cfg        *config.Config
+		err   error = nil
+		bd    backend.Backend
+		exist bool = false
+		cfg   *config.Config
 	)
 	m.mLock.Lock()
 	defer func() {
@@ -155,7 +157,7 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 				zap.String("Generate config for lightning error:", err.Error()))
 			return err
 		}
-        glue := glue_lit{}
+		glue := glue_lit{}
 		bd, err = createLocalBackend(ctx, cfg, glue)
 		if err != nil {
 			log.L().Error(LERR_CREATE_BACKEND_FAILED, zap.String("backend key", key))
@@ -196,6 +198,7 @@ func (m *LightningMemoryRoot) DeleteBackendContext(bcKey string) {
 	bc.Backend.Close()
 
 	m.currUsage -= m.structSize[bc.Key]
+	delete(m.structSize, bcKey)
 	m.currUsage -= m.structSize[string(ALLOC_BACKEND_CONTEXT)]
 	log.L().Info(LINFO_CLOSE_BACKEND, zap.String("backend key", bcKey),
 		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
@@ -222,51 +225,58 @@ func (m *LightningMemoryRoot) ClearEngines(jobId int64, indexIds ...int64) {
 	return
 }
 
-// Check and allocate one EngineInfo, delete engineInfo are put into delete backend 
+// Check and allocate one EngineInfo, delete engineInfo are put into delete backend
+// The worker count means this time the engine need pre-check memory for workers
 func (m *LightningMemoryRoot) RegistEngineInfo(job *model.Job, bcKey string, engineKey string, indexId int32, workerCount int) (int, error) {
-	var err    error = nil
+	var err error = nil
 	m.mLock.Lock()
 	defer func() {
 		m.mLock.Unlock()
 	}()
-	// Firstly, update and check the memory usage
-	m.totalMemoryConsume()
-	err = m.checkMemoryUsage(ALLOC_ENGINE_INFO)
-	if err != nil {
-		log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("Backend key", bcKey),
-			zap.String("Engine key", engineKey),
-			zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
-			zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
-		return 0, err
-	}
-
 	bc, exist := m.backendCache[bcKey]
 	if !exist {
 		log.L().Warn(LWAR_BACKEND_NOT_EXIST, zap.String("Backend key", bcKey))
 		return 0, err
 	}
+
 	// Caculate lightning concurrecy degree and set memory usage.
 	// and pre-allocate memory usage for worker
-	workerCount = m.workerDegree(workerCount)
+	newWorkerCount := m.workerDegree(workerCount, engineKey)
 	// When return workerCount is 0, means there is no memory available for lightning worker.
 	if workerCount == int(allocFailed) {
+		log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("Backend key", bcKey),
+			zap.String("Engine key", engineKey),
+			zap.String("Expected worker count:", strconv.Itoa(workerCount)),
+			zap.String("Currnt alloc wroker count:", strconv.Itoa(newWorkerCount)))
 		return 0, errors.New(LERR_CREATE_ENGINE_FAILED)
 	}
+	_, exist1 := bc.EngineCache[engineKey]
+	if !exist1 {
+		// Firstly, update and check the memory usage
+		m.totalMemoryConsume()
+		err = m.checkMemoryUsage(ALLOC_ENGINE_INFO)
+		if err != nil {
+			log.L().Warn(LERR_ALLOC_MEM_FAILED, zap.String("Backend key", bcKey),
+				zap.String("Engine key", engineKey),
+				zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
+				zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+			return 0, err
+		}
+		// Create one slice for one backend on one stmt, current we share one engine
+		err = CreateEngine(bc.Ctx, job, bcKey, engineKey, indexId, workerCount)
+		if err != nil {
+			return 0, errors.New(LERR_CREATE_ENGINE_FAILED)
+		}
 
-	// Create one slice for one backend on one stmt, current we share one engine
-	err = CreateEngine(bc.Ctx, job, bcKey, engineKey, indexId, workerCount)
-	if err != nil {
-		return 0, errors.New(LERR_CREATE_ENGINE_FAILED)
+		// Count memory usage.
+		m.currUsage += m.structSize[string(ALLOC_ENGINE_INFO)]
+		m.engineUsage += m.structSize[string(ALLOC_ENGINE_INFO)]
 	}
-
-	// Count memory usage.
-	m.currUsage += m.structSize[string(ALLOC_ENGINE_INFO)]
-	m.engineUsage += m.structSize[string(ALLOC_ENGINE_INFO)]
 	log.L().Info(LINFO_OPEN_ENGINE, zap.String("backend key", bcKey),
 		zap.String("Engine key", engineKey),
 		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
 		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
-	return workerCount, nil
+	return newWorkerCount, nil
 }
 
 // Create one
@@ -326,6 +336,8 @@ func (m *LightningMemoryRoot) deleteBackendEngines(bcKey string) error {
 	// Delete EngienInfo registed in m.engineManager.engineCache
 	for _, ei := range bc.EngineCache {
 		eiKey := ei.key
+		m.currUsage -= m.structSize[ei.key]
+		delete(m.structSize, eiKey)
 		delete(m.EngineMgr.enginePool, eiKey)
 		count++
 	}
@@ -349,17 +361,24 @@ func (m *LightningMemoryRoot) getBackendContext(bcKey string) (*BackendContext, 
 }
 
 func (m *LightningMemoryRoot) totalMemoryConsume() {
-	var memSize int64 = 0
+	var diffSize int64 = 0
 	for _, bc := range m.backendCache {
-		memSize += bc.Backend.TotalMemoryConsume()
-		m.structSize[bc.Key] = memSize
+		curSize := bc.Backend.TotalMemoryConsume()
+		bcSize, exist := m.structSize[bc.Key]
+		if !exist {
+			diffSize += curSize
+			m.structSize[bc.Key] = curSize
+		} else {
+			diffSize += curSize - bcSize
+			m.structSize[bc.Key] += curSize - bcSize
+		}
+		m.structSize[bc.Key] = curSize
 	}
-
-	m.currUsage += memSize
+	m.currUsage += diffSize
 	return
 }
 
-func (m *LightningMemoryRoot) workerDegree(workerCnt int) int {
+func (m *LightningMemoryRoot) workerDegree(workerCnt int, engineKey string) int {
 	var kvp common.KvPair
 	size := unsafe.Sizeof(kvp)
 	// If only one worker's memory init requirement still bigger than mem limitation.
@@ -367,15 +386,17 @@ func (m *LightningMemoryRoot) workerDegree(workerCnt int) int {
 		return int(allocFailed)
 	}
 
-	if workerCnt == 1 {
-		return workerCnt
-	}
-
-	for int64(size * units.MiB * uintptr(workerCnt))+m.currUsage > m.maxLimit || workerCnt == 1 {
+	for int64(size*units.MiB*uintptr(workerCnt))+m.currUsage > m.maxLimit && workerCnt > 1 {
 		workerCnt /= 2
 	}
 
 	m.currUsage += int64(size * units.MiB * uintptr(workerCnt))
+	_, exist := m.structSize[engineKey]
+	if !exist {
+		m.structSize[engineKey] = int64(size * units.MiB * uintptr(workerCnt))
+	} else {
+		m.structSize[engineKey] += int64(size * units.MiB * uintptr(workerCnt))
+	}
 	return workerCnt
 }
 
