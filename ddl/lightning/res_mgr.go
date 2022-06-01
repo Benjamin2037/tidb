@@ -173,7 +173,8 @@ func (m *LightningMemoryRoot) RegistBackendContext(ctx context.Context, unique b
 		m.currUsage += m.structSize[string(ALLOC_BACKEND_CONTEXT)]
 		log.L().Info(LINFO_CREATE_BACKEND, zap.String("backend key", key),
 			zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
-			zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
+			zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)),
+			zap.String("Unique Index:", strconv.FormatBool(unique)))
 	}
 	return err
 }

@@ -55,4 +55,6 @@ const (
 	LINFO_CHG_MEM_SETTING      string = "Lightning: Change memory setting for lightning"
 	LINFO_INIT_MEM_SETTING     string = "Lightning: Initial memory setting for lightning,"
 	LINFO_ENGINE_DELETE        string = "Lightning: Delete one engine from engine manager cache,"
+	LINFO_UNSAFE_IMPORT        string = "Lightning: Do a partial import data into TiKV,"
+
 )

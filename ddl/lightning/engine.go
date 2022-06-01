@@ -207,6 +207,7 @@ func UnsafeImportEngineData(jobId int64, indexId int64) error {
 	}
 	totalDiskSize := GlobalLightningEnv.LitMemRoot.TotalDiskUsage()
 	if GlobalLightningEnv.NeedImportEngineData(totalDiskSize) {
+		log.L().Info(LINFO_UNSAFE_IMPORT, zap.String("Engine key:", engineKey), zap.String("Current total used disk:", strconv.FormatInt(totalDiskSize, 10)))
 		err = ei.backCtx.Backend.UnsafeImportAndReset(ei.backCtx.Ctx, ei.uuid, int64(config.SplitRegionSize) * int64(config.MaxSplitRegionSizeRatio))
 		if err != nil {
 			log.L().Error(LERR_FLUSH_ENGINE_ERR, zap.String("Engine key:", engineKey),

@@ -158,7 +158,7 @@ func genLightningDataDir(sortPath string) (string, error) {
 }
 
 func (g *LightningEnv) NeedImportEngineData(UsedDisk int64) bool {
-	if UsedDisk > int64(importThreadhold*float32(g.diskQuota)) {
+	if UsedDisk > int64(importThreadhold * float32(g.diskQuota)) {
 		return true
 	}
 	return false
