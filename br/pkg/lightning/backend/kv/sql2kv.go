@@ -19,6 +19,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/tidb/sessionctx"
 	"math"
 	"math/rand"
 	"sort"
@@ -42,9 +43,6 @@ import (
 	"github.com/pingcap/tidb/util/chunk"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	// Import tidb/planner/core to initialize expression.RewriteAstExpr
-	_ "github.com/pingcap/tidb/planner/core"
 )
 
 var ExtraHandleColumnInfo = model.NewExtraHandleColInfo()
@@ -65,11 +63,16 @@ type tableKVEncoder struct {
 	autoIDFn autoIDConverter
 	metrics  *metric.Metrics
 }
+func GetSession4test(encoder Encoder) sessionctx.Context {
+	return encoder.(*tableKVEncoder).se
+}
+
 
 func NewTableKVEncoder(tbl table.Table, options *SessionOptions, metrics *metric.Metrics) (Encoder, error) {
 	if metrics != nil {
 		metrics.KvEncoderCounter.WithLabelValues("open").Inc()
 	}
+
 	meta := tbl.Meta()
 	cols := tbl.Cols()
 	se := newSession(options)
@@ -315,6 +318,14 @@ func MakeRowFromKvPairs(pairs []common.KvPair) Row {
 // constructed in such way.
 // nolint:golint // kv.KvPairsFromRows sounds good.
 func KvPairsFromRows(rows Rows) []common.KvPair {
+	return rows.(*KvPairs).pairs
+}
+
+// KvPairsFromRow converts a Rows instance constructed from MakeRowsFromKvPairs
+// back into a slice of KvPair. This method panics if the Rows is not
+// constructed in such way.
+// nolint:golint // kv.KvPairsFromRows sounds good.
+func KvPairsFromRow(rows Row) []common.KvPair {
 	return rows.(*KvPairs).pairs
 }
 

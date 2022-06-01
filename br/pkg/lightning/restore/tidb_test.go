@@ -36,14 +36,13 @@ import (
 	"github.com/pingcap/tidb/util/promutil"
 	"github.com/stretchr/testify/require"
 )
-
 type tidbSuite struct {
 	mockDB sqlmock.Sqlmock
 	timgr  *TiDBManager
 	tiGlue glue.Glue
 }
 
-func newTiDBSuite(t *testing.T) (*tidbSuite, func()) {
+func NewTiDBSuite(t *testing.T) (*tidbSuite, func()) {
 	var s tidbSuite
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -61,7 +60,7 @@ func newTiDBSuite(t *testing.T) (*tidbSuite, func()) {
 }
 
 func TestCreateTableIfNotExistsStmt(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 
 	dbName := "testdb"
@@ -166,7 +165,7 @@ func TestCreateTableIfNotExistsStmt(t *testing.T) {
 }
 
 func TestInitSchema(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -195,7 +194,7 @@ func TestInitSchema(t *testing.T) {
 }
 
 func TestInitSchemaSyntaxError(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -212,7 +211,7 @@ func TestInitSchemaSyntaxError(t *testing.T) {
 }
 
 func TestInitSchemaErrorLost(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -238,7 +237,7 @@ func TestInitSchemaErrorLost(t *testing.T) {
 }
 
 func TestInitSchemaUnsupportedSchemaError(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -261,7 +260,7 @@ func TestInitSchemaUnsupportedSchemaError(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -276,7 +275,7 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestLoadSchemaInfo(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 
 	metrics := metric.NewMetrics(promutil.NewDefaultFactory())
@@ -369,7 +368,7 @@ func TestLoadSchemaInfoMissing(t *testing.T) {
 }
 
 func TestGetGCLifetime(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -385,7 +384,7 @@ func TestGetGCLifetime(t *testing.T) {
 }
 
 func TestSetGCLifetime(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -401,7 +400,7 @@ func TestSetGCLifetime(t *testing.T) {
 }
 
 func TestAlterAutoInc(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -422,7 +421,7 @@ func TestAlterAutoInc(t *testing.T) {
 }
 
 func TestAlterAutoRandom(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -447,7 +446,7 @@ func TestAlterAutoRandom(t *testing.T) {
 }
 
 func TestObtainRowFormatVersionSucceed(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -483,7 +482,7 @@ func TestObtainRowFormatVersionSucceed(t *testing.T) {
 }
 
 func TestObtainRowFormatVersionFailure(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 
@@ -511,7 +510,7 @@ func TestObtainRowFormatVersionFailure(t *testing.T) {
 }
 
 func TestObtainNewCollationEnabled(t *testing.T) {
-	s, clean := newTiDBSuite(t)
+	s, clean := NewTiDBSuite(t)
 	defer clean()
 	ctx := context.Background()
 

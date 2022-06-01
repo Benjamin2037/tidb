@@ -736,6 +736,9 @@ const (
 	TiDBMaxAutoAnalyzeTime = "tidb_max_auto_analyze_time"
 	// TiDBEnableConcurrentDDL indicates whether to enable the new DDL framework.
 	TiDBEnableConcurrentDDL = "tidb_enable_concurrent_ddl"
+	// TiDBFastDDL indicates whether use lighting to help acceleate adding index stmt.
+	TiDBFastDDL = "tidb_fast_ddl"
+	TiDBDiskQuota = "tidb_disk_quota"
 )
 
 // TiDB intentional limits
@@ -937,6 +940,8 @@ const (
 	DefTiDBPrepPlanCacheMemoryGuardRatio         = 0.1
 	DefTiDBEnableConcurrentDDL                   = true
 	DefTiDBSimplifiedMetrics                     = false
+	DefTiDBFastDDL                               = false
+	DefTiDBDiskQuota                             = 100        // 100GB
 )
 
 // Process global variables.
@@ -985,6 +990,10 @@ var (
 	PreparedPlanCacheSize             = atomic.NewUint64(DefTiDBPrepPlanCacheSize)
 	PreparedPlanCacheMemoryGuardRatio = atomic.NewFloat64(DefTiDBPrepPlanCacheMemoryGuardRatio)
 	EnableConcurrentDDL               = atomic.NewBool(DefTiDBEnableConcurrentDDL)
+	// TiDBFastDDL indicates whether to use lightning to enhance DDL reorg performance.
+	FastDDL                               = atomic.NewBool(false)
+	// Temporary Variable for set dist quota for lightning add index, int type, GB as unit
+    DiskQuota                             = atomic.NewInt32(100)
 )
 
 var (
@@ -995,3 +1004,4 @@ var (
 	// SetStatsCacheCapacity is the func registered by domain to set statsCache memory quota.
 	SetStatsCacheCapacity atomic.Value
 )
+
