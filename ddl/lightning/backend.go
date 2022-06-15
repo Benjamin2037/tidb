@@ -62,7 +62,7 @@ func generateLightningConfig(ctx context.Context, unique bool, bcKey string) (*c
 		log.L().Warn(LWAR_CONFIG_ERROR, zap.Error(err))
 		return nil, err
 	}
-	adjustImportMemory(cfg)
+	// adjustImportMemory(cfg)
 	cfg.Checkpoint.Enable = true
 	if unique {
 		cfg.TikvImporter.DuplicateResolution = config.DupeResAlgRecord
