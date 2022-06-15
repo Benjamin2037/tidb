@@ -15,6 +15,7 @@ package ddl
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -164,6 +165,10 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 		}
 	})
 
+	fetchTag := "AddIndexLightningFetchdata" + strconv.Itoa(w.id)
+	writeTag := "AddIndexLightningWritedata" + strconv.Itoa(w.id)
+    txnTag := "AddIndexLightningBackfillDataInTxn" + strconv.Itoa(w.id)
+	
 	oprStartTime := time.Now()
 	errInTxn = kv.RunInNewTxn(context.Background(), w.sessCtx.GetStore(), true, func(ctx context.Context, txn kv.Transaction) error {
 		taskCtx.addedCount = 0
@@ -179,6 +184,8 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 		}
 		taskCtx.nextKey = nextKey
 		taskCtx.done = taskDone
+
+		logSlowOperations(time.Since(oprStartTime), fetchTag, 1000)
 
 		err = w.batchCheckUniqueKey(txn, idxRecords)
 		if err != nil {
@@ -203,8 +210,9 @@ func (w *addIndexWorkerLit) BackfillDataInTxn(handleRange reorgBackfillTask) (ta
 
 			taskCtx.addedCount++
 		}
+		logSlowOperations(time.Since(oprStartTime), writeTag, 1000)
 		return nil
 	})
-	logSlowOperations(time.Since(oprStartTime), "AddIndexLightningBackfillDataInTxn", 3000)
+	logSlowOperations(time.Since(oprStartTime), txnTag, 3000)
 	return
 }
