@@ -752,16 +752,16 @@ const (
 	// TiDBMaxAutoAnalyzeTime is the max time that auto analyze can run. If auto analyze runs longer than the value, it
 	// will be killed. 0 indicates that there is no time limit.
 	TiDBMaxAutoAnalyzeTime = "tidb_max_auto_analyze_time"
-	// TiDBFastDDL indicates whether use lighting to help acceleate adding index stmt.
-	TiDBFastDDL = "tidb_fast_ddl"
-	// TiDBDiskQuota used to set disk quota for lightning add index.
-	TiDBDiskQuota = "tidb_disk_quota"
 	// TiDBEnableConcurrentDDL indicates whether to enable the new DDL framework.
 	TiDBEnableConcurrentDDL = "tidb_enable_concurrent_ddl"
 	// TiDBAuthSigningCert indicates the path of the signing certificate to do token-based authentication.
 	TiDBAuthSigningCert = "tidb_auth_signing_cert"
 	// TiDBAuthSigningKey indicates the path of the signing key to do token-based authentication.
 	TiDBAuthSigningKey = "tidb_auth_signing_key"
+	// TiDBFastDDL indicates whether use lighting to help acceleate adding index stmt.
+	TiDBFastDDL = "tidb_fast_ddl"
+	// TiDBDiskQuota used to set disk quota for lightning add index.
+	TiDBDiskQuota = "tidb_disk_quota"
 )
 
 // TiDB intentional limits
