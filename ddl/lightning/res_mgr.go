@@ -21,7 +21,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
@@ -200,6 +199,9 @@ func (m *MemoryRoot) DeleteBackendContext(bcKey string) {
 	m.currUsage -= m.structSize[bc.Key]
 	delete(m.structSize, bcKey)
 	m.currUsage -= m.structSize[string(AllocBackendContext)]
+	if m.currUsage < 0 {
+		m.currUsage = 0
+	}
 	log.L().Info(LitInfoCloseBackend, zap.String("backend key", bcKey),
 		zap.String("Current Memory Usage:", strconv.FormatInt(m.currUsage, 10)),
 		zap.String("Memory limitation:", strconv.FormatInt(m.maxLimit, 10)))
@@ -241,7 +243,7 @@ func (m *MemoryRoot) RegistEngineInfo(job *model.Job, bcKey string, engineKey st
 
 	// Caculate lightning concurrecy degree and set memory usage.
 	// and pre-allocate memory usage for worker
-	newWorkerCount := m.workerDegree(workerCount, engineKey)
+	newWorkerCount := m.workerDegree(workerCount, engineKey, bcKey)
 	en, exist1 := bc.EngineCache[engineKey]
 	if !exist1 {
 		// When return workerCount is 0, means there is no memory available for lightning worker.
@@ -396,24 +398,48 @@ func (m *MemoryRoot) totalMemoryConsume() {
 
 // workerDegree adjust worker count according the available memory.
 // return 0 means there is no enough memory for one lightning worker.
-func (m *MemoryRoot) workerDegree(workerCnt int, engineKey string) int {
-	var kvp common.KvPair
-	size := unsafe.Sizeof(kvp)
+func (m *MemoryRoot) workerDegree(workerCnt int, engineKey string, bcKey string) int {
+	var enSize int64
+	var currWorkerNum int
+	bc, exist := m.backendCache[bcKey]
+	if !exist {
+		return 0
+	}
+
+	_, exist = m.structSize[engineKey]
+	if !exist {
+		enSize = int64(bc.cfg.TikvImporter.EngineMemCacheSize)
+	} else {
+		en, exist1 := bc.EngineCache[engineKey]
+		if !exist1 {
+			return 0
+		}
+		currWorkerNum = en.WriterCount
+	}
+	if currWorkerNum+workerCnt > bc.cfg.TikvImporter.RangeConcurrency {
+		workerCnt = bc.cfg.TikvImporter.RangeConcurrency - currWorkerNum
+		if workerCnt == 0 {
+			return workerCnt
+		}
+	}
+
+	size := int64(bc.cfg.TikvImporter.LocalWriterMemCacheSize)
+
 	// If only one worker's memory init requirement still bigger than mem limitation.
-	if int64(size*units.MiB)+m.currUsage > m.maxLimit {
+	if enSize+size+m.currUsage > m.maxLimit {
 		return int(allocFailed)
 	}
 
-	for int64(size*units.MiB*uintptr(workerCnt))+m.currUsage > m.maxLimit && workerCnt > 1 {
+	for enSize+size*int64(workerCnt)+m.currUsage > m.maxLimit && workerCnt > 1 {
 		workerCnt /= 2
 	}
 
-	m.currUsage += int64(size * units.MiB * uintptr(workerCnt))
-	_, exist := m.structSize[engineKey]
+	m.currUsage += size * int64(workerCnt)
+
 	if !exist {
-		m.structSize[engineKey] = int64(size * units.MiB * uintptr(workerCnt))
+		m.structSize[engineKey] = size * int64(workerCnt)
 	} else {
-		m.structSize[engineKey] += int64(size * units.MiB * uintptr(workerCnt))
+		m.structSize[engineKey] += size * int64(workerCnt)
 	}
 	return workerCnt
 }
@@ -474,4 +500,9 @@ func obtainImportantVariables() map[string]string {
 		}
 	}
 	return result
+}
+
+// SetFull set memory used up, only used for testing
+func (m *MemoryRoot) SetFull() {
+	m.maxLimit = m.currUsage
 }

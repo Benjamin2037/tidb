@@ -15,9 +15,17 @@
 package lightning
 
 import (
+	"context"
 	"testing"
 
+	"github.com/pingcap/tidb/parser/ast"
+	"github.com/pingcap/tidb/parser/model"
+	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx/variable"
+	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/util/chunk"
+	"github.com/pingcap/tidb/util/sqlexec"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -122,4 +130,68 @@ func TestAdjustDiskQuota(t *testing.T) {
 		}
 
 	}
+}
+
+func TestInitLightningEnv(t *testing.T) {
+	type TestCase struct {
+		name       string
+		disquota   int64
+		outputPath string
+		initSucc   bool
+	}
+	tests := []TestCase{
+		{"path1", 100 * _gb, "/tmp/tidb/tmp_ddl-4000", true},
+		{"path2", 100 * _tb, "/tmp/tidb/tmp_ddl-4000", false},
+	}
+	// Set minDiskQuota to 50 MB.
+	GlobalEnv.SetMinQuota()
+	InitGolbalLightningBackendEnv()
+	require.Equal(t, tests[0].initSucc, GlobalEnv.IsInited)
+
+	// DiskQuota check fail
+	GlobalEnv.diskQuota = tests[1].disquota
+	InitGolbalLightningBackendEnv()
+	require.Equal(t, tests[1].initSucc, GlobalEnv.IsInited)
+}
+
+func TestNeedImportEngineData(t *testing.T) {
+	type TestCase struct {
+		name   string
+		usage  uint64
+		avail  uint64
+		result bool
+	}
+	tests := []TestCase{
+		{"path1", 90 * _gb, 10 * _gb, true},
+		{"path2", 90 * _gb, 20 * _gb, true},
+		{"path3", 70 * _tb, 10 * _gb, true},
+		{"path4", 70 * _gb, 20 * _gb, false},
+	}
+	// Set minDiskQuota to 100 _gb.
+	GlobalEnv.diskQuota = 100 * _gb
+	for _, test := range tests {
+		result := GlobalEnv.NeedImportEngineData(test.usage, test.avail)
+		require.Equal(t, test.result, result)
+	}
+}
+
+type mockRestrictedSQLExecutor struct {
+	rows      []chunk.Row
+	fields    []*ast.ResultField
+	errHappen bool
+}
+
+func (m *mockRestrictedSQLExecutor) ParseWithParams(ctx context.Context, sql string, args ...interface{}) (ast.StmtNode, error) {
+	return nil, nil
+}
+
+func (m *mockRestrictedSQLExecutor) ExecRestrictedStmt(ctx context.Context, stmt ast.StmtNode, opts ...sqlexec.OptionFuncAlias) ([]chunk.Row, []*ast.ResultField, error) {
+	return nil, nil, nil
+}
+
+func (m *mockRestrictedSQLExecutor) ExecRestrictedSQL(ctx context.Context, opts []sqlexec.OptionFuncAlias, sql string, args ...interface{}) ([]chunk.Row, []*ast.ResultField, error) {
+	if m.errHappen {
+		return nil, nil, errors.New("injected error")
+	}
+	return m.rows, m.fields, nil
 }

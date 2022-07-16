@@ -23,7 +23,9 @@ import (
 
 	lcom "github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
@@ -237,4 +239,9 @@ func (l *Env) checkAndResetQuota() {
 // Only used for test.
 func (l *Env) SetMinQuota() {
 	l.diskQuota = 50 * _mb
+}
+
+// CheckPiTR check if PiTR enabled or not.
+func CheckPiTR(ctx sessionctx.Context) bool {
+	return utils.CheckLogBackupEnabled(ctx)
 }
