@@ -142,7 +142,7 @@ func adjustImportMemory(cfg *config.Config) {
 // tryAggressiveMemory lightning memory parameters according memory root's max limitation
 func tryAggressiveMemory(cfg *config.Config) bool {
 	var defaultMemSize int64
-	defaultMemSize = int64(128 * _mb * cfg.TikvImporter.RangeConcurrency)
+	defaultMemSize = int64(int(cfg.TikvImporter.LocalWriterMemCacheSize) * cfg.TikvImporter.RangeConcurrency)
 	defaultMemSize += int64(cfg.TikvImporter.EngineMemCacheSize)
 
 	if (defaultMemSize + GlobalEnv.LitMemRoot.currUsage) > GlobalEnv.LitMemRoot.maxLimit {

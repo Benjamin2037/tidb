@@ -44,3 +44,43 @@ func TestAdjustMemory(t *testing.T) {
 		require.Equal(t, test.ensize, int64(cfg.TikvImporter.EngineMemCacheSize))
 	}
 }
+
+func TestLightningBackend(t *testing.T) {
+	GlobalEnv.SetMinQuota()
+	InitGolbalLightningBackendEnv()
+	require.Equal(t, GlobalEnv.IsInited, true)
+	ctx := context.Background()
+	require.Equal(t, GlobalEnv.LitMemRoot.currUsage, int64(0))
+	// Init important variables
+	sysVars := obtainImportantVariables()
+	bckey := "bckey1"
+	cfg, err := generateLightningConfig(ctx, false, bckey)
+	require.NoError(t, err)
+	GlobalEnv.LitMemRoot.backendCache[bckey] = newBackendContext(ctx, bckey, nil, cfg, sysVars)
+	require.NoError(t, err)
+
+	// Memory allocate failed
+	GlobalEnv.LitMemRoot.currUsage = GlobalEnv.LitMemRoot.maxLimit
+	err = GlobalEnv.LitMemRoot.checkMemoryUsage(AllocBackendContext)
+	require.Error(t, err)
+
+	// variable test
+	isEnable := IsEngineLightningBackfill(1)
+	needRestore := NeedRestore(1)
+	require.Equal(t, false, isEnable)
+	require.Equal(t, false, needRestore)
+
+	bckey = "2"
+	GlobalEnv.LitMemRoot.backendCache[bckey] = newBackendContext(ctx, bckey, nil, cfg, sysVars)
+	isEnable = IsEngineLightningBackfill(2)
+	needRestore = NeedRestore(2)
+	require.Equal(t, false, isEnable)
+	require.Equal(t, false, needRestore)
+
+	SetEnable(2, true)
+	SetNeedRestore(2, true)
+	isEnable = IsEngineLightningBackfill(2)
+	needRestore = NeedRestore(2)
+	require.Equal(t, true, isEnable)
+	require.Equal(t, true, needRestore)
+}
