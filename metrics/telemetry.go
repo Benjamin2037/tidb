@@ -35,6 +35,13 @@ var (
 			Name:      "multi_schema_change_usage",
 			Help:      "Counter of usage of multi-schema change",
 		})
+	TelemetryAddIndexLightningCnt = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "tidb",
+			Subsystem: "telemetry",
+			Name:      "add_index_lightning_usage",
+			Help:      "Counter of usage of add index lightning",
+		})
 )
 
 // readCounter reads the value of a prometheus.Counter.
@@ -110,5 +117,24 @@ func (n NonTransactionalStmtCounter) Sub(rhs NonTransactionalStmtCounter) NonTra
 func GetNonTransactionalStmtCounter() NonTransactionalStmtCounter {
 	return NonTransactionalStmtCounter{
 		DeleteCount: readCounter(NonTransactionalDeleteCount),
+	}
+}
+
+// AddIndexLightning records the usages of Add Index with Lightning solution.
+type AddIndexLightningUsageCounter struct {
+	AddIndexLightningUsed int64 `json:"add_index_lightning_used"`
+}
+
+// Sub returns the difference of two counters.
+func (a AddIndexLightningUsageCounter) Sub(rhs AddIndexLightningUsageCounter) AddIndexLightningUsageCounter {
+	return AddIndexLightningUsageCounter{
+		AddIndexLightningUsed: a.AddIndexLightningUsed - rhs.AddIndexLightningUsed,
+	}
+}
+
+// GetAddIndexLightningCounter gets the add index lightning counts.
+func GetAddIndexLightningCounter() AddIndexLightningUsageCounter {
+	return AddIndexLightningUsageCounter{
+		AddIndexLightningUsed: readCounter(TelemetryAddIndexLightningCnt),
 	}
 }
