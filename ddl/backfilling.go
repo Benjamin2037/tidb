@@ -620,7 +620,7 @@ func (w *worker) writePhysicalTableRecord(t table.PhysicalTable, bfWorkerType ba
 			}
 		} else {
 			// if enabled PiTR, use txn do backfill with new flow.
-			logutil.BgLogger().Error("PiTR enabled, disabled lightning backfill.")
+			logutil.BgLogger().Info("PiTR enabled, disabled lightning backfill.")
 		}
 	}
 	backfillWorkers := make([]*backfillWorker, 0, workerCnt)
