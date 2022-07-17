@@ -45,11 +45,17 @@ const (
 	BackfillProgressPercent float64 = 0.6
 )
 
+var (
+	telemetryAddIndexLightningUsage = metrics.TelemetryAddIndexLightningCnt
+)
+
 // IsAllowFastDDL check whether Fast DDl is allowed.
 func IsAllowFastDDL() bool {
 	// Only when both TiDBFastDDL is set to on and Lightning env is inited successful,
 	// the add index could choose lightning path to do backfill procedure.
 	if variable.FastDDL.Load() && lit.GlobalEnv.IsInited {
+		// Increase telemetryAddIndexLightningUsage
+		telemetryAddIndexLightningUsage.Inc()
 		return true
 	}
 	return false

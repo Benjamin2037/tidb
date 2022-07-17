@@ -49,6 +49,7 @@ type featureUsage struct {
 	GlobalKill            bool                             `json:"globalKill"`
 	MultiSchemaChange     *m.MultiSchemaChangeUsageCounter `json:"multiSchemaChange"`
 	LogBackup             bool                             `json:"logBackup"`
+	AddIndexLightning     *m.AddIndexLightningUsageCounter `json:"AddIndexLightning"`
 }
 
 type placementPolicyUsage struct {
@@ -84,6 +85,8 @@ func getFeatureUsage(ctx context.Context, sctx sessionctx.Context) (*featureUsag
 	usage.GlobalKill = getGlobalKillUsageInfo()
 
 	usage.LogBackup = getLogBackupUsageInfo(sctx)
+
+	usage.AddIndexLightning = getAddIndexLightningUsageInfo()
 
 	return &usage, nil
 }
@@ -209,6 +212,7 @@ var initialTxnCommitCounter metrics.TxnCommitCounter
 var initialCTECounter m.CTEUsageCounter
 var initialNonTransactionalCounter m.NonTransactionalStmtCounter
 var initialMultiSchemaChangeCounter m.MultiSchemaChangeUsageCounter
+var initialAddIndexLightningCounter m.AddIndexLightningUsageCounter
 
 // getTxnUsageInfo gets the usage info of transaction related features. It's exported for tests.
 func getTxnUsageInfo(ctx sessionctx.Context) *TxnUsage {
@@ -256,6 +260,10 @@ func postReportMultiSchemaChangeUsage() {
 	initialMultiSchemaChangeCounter = m.GetMultiSchemaCounter()
 }
 
+func postReportAddIndexLightingUsage() {
+	initialAddIndexLightningCounter = m.GetAddIndexLightningCounter()
+}
+
 func getMultiSchemaChangeUsageInfo() *m.MultiSchemaChangeUsageCounter {
 	curr := m.GetMultiSchemaCounter()
 	diff := curr.Sub(initialMultiSchemaChangeCounter)
@@ -286,4 +294,10 @@ func getGlobalKillUsageInfo() bool {
 
 func getLogBackupUsageInfo(ctx sessionctx.Context) bool {
 	return utils.CheckLogBackupEnabled(ctx)
+}
+
+func getAddIndexLightningUsageInfo() *m.AddIndexLightningUsageCounter {
+	curr := m.GetAddIndexLightningCounter()
+	diff := curr.Sub(initialAddIndexLightningCounter)
+	return &diff
 }

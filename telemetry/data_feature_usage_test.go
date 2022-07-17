@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/ddl"
+	lit "github.com/pingcap/tidb/ddl/lightning"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/telemetry"
 	"github.com/pingcap/tidb/testkit"
@@ -278,4 +280,33 @@ func TestGlobalKillUsageInfo(t *testing.T) {
 	usage, err = telemetry.GetFeatureUsage(tk.Session())
 	require.NoError(t, err)
 	require.False(t, usage.GlobalKill)
+}
+
+func TestAddIndexLightning(t *testing.T) {
+	store, clean := testkit.CreateMockStore(t)
+	defer clean()
+	lit.GlobalEnv.SetMinQuota()
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("use test")
+
+	usage, err := telemetry.GetFeatureUsage(tk.Session())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), usage.AddIndexLightning.AddIndexLightningUsed)
+	allow := ddl.IsAllowFastDDL()
+	require.Equal(t, false, allow)
+	tk.MustExec("drop table if exists tele_t")
+	tk.MustExec("create table tele_t(id int, b int)")
+	tk.MustExec("insert into tele_t values(1,1),(2,2);")
+	tk.MustExec("alter table tele_t add index idx_org(b)")
+	usage, err = telemetry.GetFeatureUsage(tk.Session())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), usage.AddIndexLightning.AddIndexLightningUsed)
+
+	tk.MustExec("set @@global.tidb_fast_ddl = on")
+	allow = ddl.IsAllowFastDDL()
+	require.Equal(t, true, allow)
+	usage, err = telemetry.GetFeatureUsage(tk.Session())
+	require.NoError(t, err)
+	// Because we have called once ddl.IsAllowFastDDL() so we get two as result.
+	require.Equal(t, int64(1), usage.AddIndexLightning.AddIndexLightningUsed)
 }
