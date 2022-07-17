@@ -1681,7 +1681,8 @@ var defaultSysVars = []*SysVar{
 	}},
 	{Scope: ScopeSession, Name: TiDBMemoryDebugModeAlarmRatio, Value: strconv.Itoa(0), Type: TypeInt, MinValue: 0, MaxValue: math.MaxInt64, SetSession: func(s *SessionVars, val string) error {
 		s.MemoryDebugModeAlarmRatio = TidbOptInt64(val, 0)
-
+		return nil
+	}},
 	{Scope: ScopeGlobal, Name: TiDBFastDDL, Value: BoolToOnOff(DefTiDBFastDDL), Type: TypeBool, GetGlobal: func(sv *SessionVars) (string, error) {
 		return BoolToOnOff(FastDDL.Load()), nil
 	}, SetGlobal: func(s *SessionVars, val string) error {

@@ -1070,7 +1070,7 @@ func TestDefaultMemoryDebugModeValue(t *testing.T) {
 	require.Equal(t, val, "0")
 }
 
-func TestSetTIDBFastDDL(t *testing.T) {
+func TestSetTIDBEnableFastDDL(t *testing.T) {
 	vars := NewSessionVars()
 	mock := NewMockGlobalAccessor4Tests()
 	mock.SessionVars = vars
@@ -1095,7 +1095,7 @@ func TestSetTIDBFastDDL(t *testing.T) {
 	require.Equal(t, Off, val)
 }
 
-func TestSetTIDBDiskQuota(t *testing.T) {
+func TestSetTIDBDDLDiskQuota(t *testing.T) {
 	vars := NewSessionVars()
 	mock := NewMockGlobalAccessor4Tests()
 	mock.SessionVars = vars
