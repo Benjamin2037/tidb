@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tikvpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/tidb/br/pkg/conn"
+	"github.com/pingcap/tidb/br/pkg/conn/util"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"github.com/pingcap/tidb/br/pkg/httputil"
 	"github.com/pingcap/tidb/br/pkg/logutil"
@@ -439,7 +439,7 @@ func (c *pdClient) BatchSplitRegions(
 }
 
 func (c *pdClient) getStoreCount(ctx context.Context) (int, error) {
-	stores, err := conn.GetAllTiKVStores(ctx, c.client, conn.SkipTiFlash)
+	stores, err := util.GetAllTiKVStores(ctx, c.client, util.SkipTiFlash)
 	if err != nil {
 		return 0, err
 	}

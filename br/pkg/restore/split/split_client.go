@@ -1,3 +1,5 @@
+// Copyright 2020 PingCAP, Inc. Licensed under Apache-2.0.
+
 package split
 
 import (
@@ -28,7 +30,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/httputil"
 	"github.com/pingcap/tidb/br/pkg/logutil"
 	"github.com/pingcap/tidb/br/pkg/redact"
-	"github.com/pingcap/tidb/br/pkg/utils/utildb"
+	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/store/pdtypes"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/multierr"
@@ -110,7 +112,7 @@ func PaginateScanRegion(
 	}
 
 	var regions []*RegionInfo
-	err := utildb.WithRetry(ctx, func() error {
+	err := utils.WithRetry(ctx, func() error {
 		regions = []*RegionInfo{}
 		scanStartKey := startKey
 		for {
@@ -144,7 +146,7 @@ type scanRegionBackoffer struct {
 	attempt int
 }
 
-func newScanRegionBackoffer() utildb.Backoffer {
+func newScanRegionBackoffer() utils.Backoffer {
 	return &scanRegionBackoffer{
 		attempt: 3,
 	}
