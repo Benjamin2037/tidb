@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/br/pkg/backup"
 	"github.com/pingcap/tidb/br/pkg/checksum"
-	"github.com/pingcap/tidb/br/pkg/conn"
+	"github.com/pingcap/tidb/br/pkg/conn/util"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"github.com/pingcap/tidb/br/pkg/glue"
 	"github.com/pingcap/tidb/br/pkg/logutil"
@@ -874,7 +874,7 @@ func (rc *Client) ResetSpeedLimit(ctx context.Context) error {
 
 func (rc *Client) setSpeedLimit(ctx context.Context, rateLimit uint64) error {
 	if !rc.hasSpeedLimited {
-		stores, err := conn.GetAllTiKVStores(ctx, rc.pdClient, conn.SkipTiFlash)
+		stores, err := util.GetAllTiKVStores(ctx, rc.pdClient, util.SkipTiFlash)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1088,7 +1088,7 @@ func (rc *Client) SwitchToNormalMode(ctx context.Context) error {
 }
 
 func (rc *Client) switchTiKVMode(ctx context.Context, mode import_sstpb.SwitchMode) error {
-	stores, err := conn.GetAllTiKVStores(ctx, rc.pdClient, conn.SkipTiFlash)
+	stores, err := util.GetAllTiKVStores(ctx, rc.pdClient, util.SkipTiFlash)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1512,7 +1512,7 @@ func (rc *Client) PreCheckTableTiFlashReplica(
 	tables []*metautil.Table,
 	skipTiflash bool,
 ) error {
-	tiFlashStores, err := conn.GetAllTiKVStores(ctx, rc.pdClient, conn.TiFlashOnly)
+	tiFlashStores, err := util.GetAllTiKVStores(ctx, rc.pdClient, util.TiFlashOnly)
 	if err != nil {
 		return errors.Trace(err)
 	}
