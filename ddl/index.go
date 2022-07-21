@@ -920,7 +920,7 @@ func onDropIndex(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error) {
 		// Finish this job.
 		if job.IsRollingback() {
 			job.FinishTableJob(model.JobStateRollbackDone, model.StateNone, ver, tblInfo)
-			if indexInfo.SubState == model.StateNone {
+			if indexInfo.SubState == model.StatePublic {
 				job.Args[0] = indexInfo.ID
 			} else {
 				// If go through new backfill flow, set temp index id as index id.
