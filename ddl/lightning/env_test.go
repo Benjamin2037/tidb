@@ -15,17 +15,9 @@
 package lightning
 
 import (
-	"context"
 	"testing"
 
-	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/model"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx/variable"
-	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/util/chunk"
-	"github.com/pingcap/tidb/util/sqlexec"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,7 +98,6 @@ func TestAdjustDiskQuota(t *testing.T) {
 		{"quota7", "", 100 * _gb, 2 * _pb, 100 * _gb, 205 * _gb},
 		{"quota8", "/lightning", 1000 * _tb, 1 * _pb, 100 * _gb, 106 * _gb},
 	}
-	GlobalEnv.SetMinQuota()
 	for _, test := range tests {
 		result, _ := genLightningDataDir(test.sortPath, 4000)
 		GlobalEnv.SortPath = result
@@ -143,12 +134,12 @@ func TestInitLightningEnv(t *testing.T) {
 		{"path1", 100 * _gb, "/tmp/tidb/tmp_ddl-4000", true},
 		{"path2", 100 * _tb, "/tmp/tidb/tmp_ddl-4000", false},
 	}
-	// Set minDiskQuota to 50 MB.
-	GlobalEnv.SetMinQuota()
+
 	InitGolbalLightningBackendEnv()
 	require.Equal(t, tests[0].initSucc, GlobalEnv.IsInited)
 
 	// DiskQuota check fail
+	GlobalEnv.isTestMode = true
 	GlobalEnv.diskQuota = tests[1].disquota
 	InitGolbalLightningBackendEnv()
 	require.Equal(t, tests[1].initSucc, GlobalEnv.IsInited)
@@ -173,25 +164,4 @@ func TestNeedImportEngineData(t *testing.T) {
 		result := GlobalEnv.NeedImportEngineData(test.usage, test.avail)
 		require.Equal(t, test.result, result)
 	}
-}
-
-type mockRestrictedSQLExecutor struct {
-	rows      []chunk.Row
-	fields    []*ast.ResultField
-	errHappen bool
-}
-
-func (m *mockRestrictedSQLExecutor) ParseWithParams(ctx context.Context, sql string, args ...interface{}) (ast.StmtNode, error) {
-	return nil, nil
-}
-
-func (m *mockRestrictedSQLExecutor) ExecRestrictedStmt(ctx context.Context, stmt ast.StmtNode, opts ...sqlexec.OptionFuncAlias) ([]chunk.Row, []*ast.ResultField, error) {
-	return nil, nil, nil
-}
-
-func (m *mockRestrictedSQLExecutor) ExecRestrictedSQL(ctx context.Context, opts []sqlexec.OptionFuncAlias, sql string, args ...interface{}) ([]chunk.Row, []*ast.ResultField, error) {
-	if m.errHappen {
-		return nil, nil, errors.New("injected error")
-	}
-	return m.rows, m.fields, nil
 }
