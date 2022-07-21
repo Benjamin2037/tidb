@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/tidb/parser/terror"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/tablecodec"
+	"github.com/pingcap/tidb/util/codec"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/sqlexec"
 	topsqlstate "github.com/pingcap/tidb/util/topsql/state"
@@ -334,6 +335,7 @@ func insertJobIntoDeleteRangeTable(ctx context.Context, sctx sessionctx.Context,
 		if tmpID == indexID {
 			isOldBackfill = false
 			indexID = tablecodec.IndexIDMask | indexID
+			tmpID = int64(codec.EncodeIntToCmpUint(tmpID))
 		}
 		if len(partitionIDs) > 0 {
 			for _, pid := range partitionIDs {

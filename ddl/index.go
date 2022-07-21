@@ -39,7 +39,6 @@ import (
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util"
-	"github.com/pingcap/tidb/util/codec"
 	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
 	decoder "github.com/pingcap/tidb/util/rowDecoder"
@@ -634,13 +633,13 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 		}
 
 		indexInfo.State = model.StatePublic
-		var tmpIndexID uint64
+		var tmpIndexID int64
 		if indexInfo.SubState != model.StatePublic {
 			// After merge data into TiKV, then the progress set to 100.
 			metrics.GetBackfillProgressByLabel(metrics.LblAddIndex).Set(100)
 			// Set sub state to stateNone to stop double write
 			indexInfo.SubState = model.StatePublic
-			tmpIndexID = codec.EncodeIntToCmpUint(tablecodec.TempIndexPrefix | indexInfo.ID)
+			tmpIndexID = tablecodec.TempIndexPrefix | indexInfo.ID
 		}
 
 		// Set column index flag.
@@ -660,7 +659,7 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 		if tmpIndexID != 0 {
 			// Clean temp index if needed
 			job.Args = job.Args[:0]
-			job.Args = []interface{}{tmpIndexID, getPartitionIDs(tblInfo)}
+			job.Args = []interface{}{tmpIndexID, false, getPartitionIDs(tblInfo)}
 		}
 	default:
 		err = dbterror.ErrInvalidDDLState.GenWithStackByArgs("index", tblInfo.State)
@@ -924,7 +923,7 @@ func onDropIndex(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error) {
 				job.Args[0] = indexInfo.ID
 			} else {
 				// If go through new backfill flow, set temp index id as index id.
-				job.Args[0] = codec.EncodeIntToCmpUint(tablecodec.TempIndexPrefix | indexInfo.ID)
+				job.Args[0] = tablecodec.TempIndexPrefix | indexInfo.ID
 			}
 			// the partition ids were append by convertAddIdxJob2RollbackJob, it is weird, but for the compatibility,
 			// we should keep appending the partitions in the convertAddIdxJob2RollbackJob.
