@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
+	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
 	"github.com/pingcap/tidb/br/pkg/lightning/common"
 	"github.com/pingcap/tidb/br/pkg/lightning/config"
 	"github.com/pingcap/tidb/br/pkg/lightning/log"
@@ -88,6 +89,14 @@ func CreateEngine(
 		CompactThreshold:   compactMem,
 		CompactConcurrency: compactConcurr,
 	}
+	// Set engine tableInfo
+	cpt := checkpoints.TidbTableInfo{
+		ID:   job.ID,
+		DB:   job.SchemaName,
+		Name: job.TableName,
+	}
+	cfg.TableInfo = &cpt
+
 	// Get a created backend to create engine under it.
 	bc := GlobalEnv.LitMemRoot.backendCache[backendKey]
 	be := bc.Backend
