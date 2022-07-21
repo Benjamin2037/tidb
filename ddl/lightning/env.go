@@ -57,6 +57,7 @@ type Env struct {
 	LitMemRoot MemoryRoot
 	diskQuota  int64
 	IsInited   bool
+	isTestMode bool
 }
 
 var (
@@ -117,6 +118,11 @@ func InitGolbalLightningBackendEnv() {
 			zap.String("Sort Path Error:", err.Error()),
 			zap.String("Lightning is initialized:", strconv.FormatBool(GlobalEnv.IsInited)))
 		return
+	}
+
+	// If use default path /tmp/tidb, then we set min disk quota to 10 GB.
+	if cfg.LightningSortPath == "/tmp/tidb" {
+		GlobalEnv.SetMinQuota()
 	}
 
 	diskQuota, err = GlobalEnv.parseDiskQuota(variable.DiskQuota.Load())
@@ -238,7 +244,9 @@ func (l *Env) checkAndResetQuota() {
 // SetMinQuota set disk Quota to a low value to let unit test pass.
 // Only used for test.
 func (l *Env) SetMinQuota() {
-	l.diskQuota = 50 * _mb
+	if !l.isTestMode {
+		l.diskQuota = 10 * _gb
+	}
 }
 
 // CheckPiTR check if PiTR enabled or not.
