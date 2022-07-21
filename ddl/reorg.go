@@ -262,9 +262,11 @@ func (w *worker) runReorgJob(rh *reorgHandler, reorgInfo *reorgInfo, tblInfo *mo
 		case model.ActionModifyColumn:
 			metrics.GetBackfillProgressByLabel(metrics.LblModifyColumn).Set(100)
 		}
-		if err1 := rh.RemoveDDLReorgHandle(job, reorgInfo.elements); err1 != nil {
-			logutil.BgLogger().Warn("[ddl] run reorg job done, removeDDLReorgHandle failed", zap.Error(err1))
-			return errors.Trace(err1)
+		if isLightningEnabled(reorgInfo.ID) {
+			if err1 := rh.RemoveDDLReorgHandle(job, reorgInfo.elements); err1 != nil {
+				logutil.BgLogger().Warn("[ddl] run reorg job done, removeDDLReorgHandle failed", zap.Error(err1))
+				return errors.Trace(err1)
+			}
 		}
 	case <-w.ctx.Done():
 		logutil.BgLogger().Info("[ddl] run reorg job quit")
@@ -854,7 +856,10 @@ func (w *worker) runMergeJob(rh *reorgHandler, reorgInfo *reorgInfo, tblInfo *mo
 		if err != nil {
 			return errors.Trace(err)
 		}
-
+		if err1 := rh.RemoveDDLReorgHandle(job, reorgInfo.elements); err1 != nil {
+			logutil.BgLogger().Warn("[ddl] merge temp index job done, removeDDLReorgHandle failed", zap.Error(err1))
+			return errors.Trace(err1)
+		}
 	case <-w.ctx.Done():
 		logutil.BgLogger().Info("[ddl] run merge job quit")
 		d.removeReorgCtx(job)
