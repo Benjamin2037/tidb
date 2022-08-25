@@ -45,6 +45,7 @@ type suiteContext struct {
 	rowNum   int
 	workload *workload
 	tkPool   *sync.Pool
+	isFailpointTest bool
 }
 
 func (s *suiteContext) getTestKit() *testkit.TestKit {
@@ -308,6 +309,9 @@ func testOneColFrame(ctx *suiteContext, colIDs [][]int, f func(*suiteContext, in
 			if ctx.workload != nil {
 				ctx.workload.start(ctx, tableID, i)
 			}
+			if ctx.isFailpointTest {
+				go useFailpoint(ctx.t, i)
+			}
 			err := f(ctx, tableID, tableName, i)
 			if err != nil {
 				if ctx.isUnique || ctx.isPK {
@@ -335,6 +339,10 @@ func testTwoColsFrame(ctx *suiteContext, iIDs [][]int, jIDs [][]int, f func(*sui
 			for _, j := range jIDs[tableID] {
 				if ctx.workload != nil {
 					ctx.workload.start(ctx, tableID, i, j)
+				}
+				if ctx.isFailpointTest {
+					go useFailpoint(ctx.t, i)
+					go useFailpoint(ctx.t, j)
 				}
 				err := f(ctx, tableID, tableName, indexID, i, j)
 				if err != nil {
@@ -367,6 +375,9 @@ func testOneIndexFrame(ctx *suiteContext, colID int, f func(*suiteContext, int, 
 		require.NoError(ctx.t, err)
 		if ctx.workload != nil {
 			_ = ctx.workload.stop(ctx)
+		}
+		if ctx.isFailpointTest {
+			go useFailpoint(ctx.t, tableID)
 		}
 		if err == nil {
 			if ctx.isPK {
