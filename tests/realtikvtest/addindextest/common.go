@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/testkit"
@@ -33,18 +34,18 @@ const (
 )
 
 type suiteContext struct {
-	ctx      context.Context
-	cancel   func()
-	store    kv.Storage
-	t        *testing.T
-	tk       *testkit.TestKit
-	isUnique bool
-	isPK     bool
-	tableNum int
-	colNum   int
-	rowNum   int
-	workload *workload
-	tkPool   *sync.Pool
+	ctx             context.Context
+	cancel          func()
+	store           kv.Storage
+	t               *testing.T
+	tk              *testkit.TestKit
+	isUnique        bool
+	isPK            bool
+	tableNum        int
+	colNum          int
+	rowNum          int
+	workload        *workload
+	tkPool          *sync.Pool
 	isFailpointTest bool
 }
 
@@ -132,7 +133,7 @@ func createTable(tk *testkit.TestKit) {
 func insertRows(tk *testkit.TestKit) {
 	var (
 		insStr string
-		values []string = []string{
+		values = []string{
 			" (1, 1, 1, 1, 1, 1, 1, 1, 1.0, 1.0, 1111.1111, '2001-01-01', '11:11:11', '2001-01-01 11:11:11', '2001-01-01 11:11:11.123456', 1999, 'aaaa', 'aaaa', 'aaaa', 'aaaa', 'aaaa','aaaa', 'aaaa', 'aaaa', 'aaaa', 'aaaa', 'aaaa', 'aaaa', '{\"name\": \"Beijing\", \"population\": 100}')",
 			" (2, 2, 2, 2, 2, 2, 2, 2, 2.0, 2.0, 1112.1111, '2001-01-02', '11:11:12', '2001-01-02 11:11:12', '2001-01-02 11:11:12.123456', 2000, 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', 'bbbb', '{\"name\": \"Beijing\", \"population\": 101}')",
 			" (3, 3, 3, 3, 3, 3, 3, 3, 3.0, 3.0, 1113.1111, '2001-01-03', '11:11:13', '2001-01-03 11:11:13', '2001-01-03 11:11:11.123456', 2001, 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', 'cccc', '{\"name\": \"Beijing\", \"population\": 102}')",
@@ -310,7 +311,7 @@ func testOneColFrame(ctx *suiteContext, colIDs [][]int, f func(*suiteContext, in
 				ctx.workload.start(ctx, tableID, i)
 			}
 			if ctx.isFailpointTest {
-				go useFailpoint(ctx.t, i)
+				go useFailpoints(ctx.t, i)
 			}
 			err := f(ctx, tableID, tableName, i)
 			if err != nil {
@@ -341,8 +342,8 @@ func testTwoColsFrame(ctx *suiteContext, iIDs [][]int, jIDs [][]int, f func(*sui
 					ctx.workload.start(ctx, tableID, i, j)
 				}
 				if ctx.isFailpointTest {
-					go useFailpoint(ctx.t, i)
-					go useFailpoint(ctx.t, j)
+					go useFailpoints(ctx.t, i)
+					go useFailpoints(ctx.t, j)
 				}
 				err := f(ctx, tableID, tableName, indexID, i, j)
 				if err != nil {
@@ -377,7 +378,7 @@ func testOneIndexFrame(ctx *suiteContext, colID int, f func(*suiteContext, int, 
 			_ = ctx.workload.stop(ctx)
 		}
 		if ctx.isFailpointTest {
-			go useFailpoint(ctx.t, tableID)
+			go useFailpoints(ctx.t, tableID)
 		}
 		if err == nil {
 			if ctx.isPK {
@@ -444,4 +445,30 @@ func addIndexMultiCols(ctx *suiteContext, tableID int, tableName string, indexID
 		require.NoError(ctx.t, err)
 	}
 	return err
+}
+
+type failpointsPath struct {
+	failpath string
+	interm   string
+}
+
+var failpoints = []failpointsPath{
+	{"github.com/pingcap/tidb/ddl/EnablePiTR", "return"},
+	{"github.com/pingcap/tidb/ddl/mockHighLoadForAddIndex", "return"},
+	{"github.com/pingcap/tidb/ddl/mockBackfillRunErr", "1*return"},
+	{"github.com/pingcap/tidb/ddl/mockBackfillSlow", "return"},
+	{"github.com/pingcap/tidb/ddl/MockCaseWhenParseFailure", "return(true)"},
+	{"github.com/pingcap/tidb/ddl/checkBackfillWorkerNum", "return(true)"},
+	{"github.com/pingcap/tidb/ddl/checkMergeWorkerNum", "return(true)"},
+	{"github.com/pingcap/tidb/ddl/mockHighLoadForMergeIndex", "return"},
+	{"github.com/pingcap/tidb/ddl/mockMergeRunErr", "1*return"},
+	{"github.com/pingcap/tidb/ddl/mockMergeSlow", "return"},
+}
+
+func useFailpoints(t *testing.T, failpos int) {
+	failpos %= 10
+	require.NoError(t, failpoint.Enable(failpoints[failpos].failpath, failpoints[failpos].interm))
+
+	time.Sleep(10 * time.Second)
+	require.NoError(t, failpoint.Disable(failpoints[failpos].failpath))
 }

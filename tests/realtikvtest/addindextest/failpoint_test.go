@@ -16,37 +16,15 @@ package addindextest
 
 import (
 	"testing"
-	"time"
-
-	"github.com/pingcap/failpoint"
-	"github.com/stretchr/testify/require"
 )
-
-type failpointPath struct {
-	failpath string
-	interm   string
-}
-
-var failpoints []failpointPath = []failpointPath{
-	{"github.com/pingcap/tidb/ddl/EnablePiTR", "return"},
-	{"github.com/pingcap/tidb/ddl/mockHighLoadForAddIndex", "return"},
-	{"github.com/pingcap/tidb/ddl/mockBackfillRunErr", "1*return"},
-	{"github.com/pingcap/tidb/ddl/mockBackfillSlow", "return"},
-	{"github.com/pingcap/tidb/ddl/MockCaseWhenParseFailure", "return(true)"},
-	{"github.com/pingcap/tidb/ddl/checkBackfillWorkerNum", "return(true)"},
-	{"github.com/pingcap/tidb/ddl/checkMergeWorkerNum", "return(true)"},
-	{"github.com/pingcap/tidb/ddl/mockHighLoadForMergeIndex", "return"},
-	{"github.com/pingcap/tidb/ddl/mockMergeRunErr", "1*return"},
-	{"github.com/pingcap/tidb/ddl/mockMergeSlow", "return"},
-}
 
 func initTestFailpoint(t *testing.T) *suiteContext {
 	ctx := initTest(t)
 	ctx.isFailpointTest = true
-	return ctx   
+	return ctx
 }
 
-func TestCreateNonUniqueIndexFailPoint(t *testing.T) {
+func TestCreateNonUniqueIndexFailpoints(t *testing.T) {
 	var colIDs = [][]int{
 		{1, 4, 7, 10, 13, 16, 19, 22, 25},
 		{2, 5, 8, 11, 14, 17, 20, 23, 26},
@@ -56,8 +34,8 @@ func TestCreateNonUniqueIndexFailPoint(t *testing.T) {
 	testOneColFrame(ctx, colIDs, addIndexNonUnique)
 }
 
-func TestCreateUniqueIndexFailPoint(t *testing.T) {
-	var colIDs [][]int = [][]int{
+func TestCreateUniqueIndexFailpoints(t *testing.T) {
+	var colIDs = [][]int{
 		{1, 6, 7, 8, 11, 13, 15, 16, 18, 19, 22, 26},
 		{2, 9, 11, 17},
 		{3, 12, 25},
@@ -66,17 +44,17 @@ func TestCreateUniqueIndexFailPoint(t *testing.T) {
 	testOneColFrame(ctx, colIDs, addIndexUnique)
 }
 
-func TestCreatePrimaryKeyFailpoint(t *testing.T) {
+func TestCreatePrimaryKeyFailpoints(t *testing.T) {
 	ctx := initTest(t)
 	testOneIndexFrame(ctx, 0, addIndexPK)
 }
 
-func TestCreateGenColIndexFailpoint(t *testing.T) {
+func TestCreateGenColIndexFailpoints(t *testing.T) {
 	ctx := initTestFailpoint(t)
 	testOneIndexFrame(ctx, 29, addIndexGenCol)
 }
 
-func TestCreateMultiColsIndexFailpoint(t *testing.T) {
+func TestCreateMultiColsIndexFailpoints(t *testing.T) {
 	var coliIDs = [][]int{
 		{1, 4, 7, 10, 13},
 		{2, 5, 8, 11},
@@ -89,12 +67,4 @@ func TestCreateMultiColsIndexFailpoint(t *testing.T) {
 	}
 	ctx := initTestFailpoint(t)
 	testTwoColsFrame(ctx, coliIDs, coljIDs, addIndexMultiCols)
-}
-
-func UseFailpoint(t *testing.T, failpos int) {
-	failpos %= 10
-	require.NoError(t, failpoint.Enable(failpoints[failpos].failpath, failpoints[failpos].interm))
-	
-	time.Sleep(10 * time.Second)
-	require.NoError(t, failpoint.Disable(failpoints[failpos].failpath))	
 }
