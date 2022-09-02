@@ -676,7 +676,7 @@ func (w *worker) onCreateIndex(d *ddlCtx, t *meta.Meta, job *model.Job, isPK boo
 
 // pickBackfillProcess determines which backfill process will be used.
 func pickBackfillProcess(w *worker, job *model.Job) model.ReorgType {
-	if job.SnapshotVer != 0 {
+	if job.ReorgMeta.ReorgTp != model.ReorgTypeNone {
 		// The backfill task has been started.
 		// Don't switch the backfill process.
 		return job.ReorgMeta.ReorgTp
