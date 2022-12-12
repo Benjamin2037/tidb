@@ -210,6 +210,7 @@ import (
 	outer             "OUTER"
 	over              "OVER"
 	partition         "PARTITION"
+	pause             "PAUSE"
 	percentRank       "PERCENT_RANK"
 	precisionType     "PRECISION"
 	primary           "PRIMARY"
@@ -1242,6 +1243,7 @@ import (
 	TableSampleUnitOpt                     "table sample unit optional"
 	TableToTable                           "rename table to table"
 	TableToTableList                       "rename table to table by list"
+	TaskTypeOpt                            "backend task type"
 	TextString                             "text string item"
 	TextStringList                         "text string list"
 	TimeUnit                               "Time unit for 'DATE_ADD', 'DATE_SUB', 'ADDDATE', 'SUBDATE', 'EXTRACT'"
@@ -10539,6 +10541,21 @@ AdminStmt:
 		ret.LimitSimple.Offset = $6.(*ast.LimitSimple).Offset
 		$$ = ret
 	}
+|	"ADMIN" "PAUSE" TaskTypeOpt ForceOpt
+	{
+		$$ = &ast.AdminStmt{
+			Tp:       ast.AdminPause,
+			TaskType: $3.(string),
+			Force:    $4.(bool),
+		}
+	}
+|	"ADMIN" "RESUME" TaskTypeOpt
+	{
+		$$ = &ast.AdminStmt{
+			Tp:       ast.AdminResume,
+			TaskType: $3.(string),
+		}
+	}
 |	"ADMIN" "SHOW" "SLOW" AdminShowSlow
 	{
 		$$ = &ast.AdminStmt{
@@ -10698,6 +10715,16 @@ NumList:
 |	NumList ',' Int64Num
 	{
 		$$ = append($1.([]int64), $3.(int64))
+	}
+
+TaskTypeOpt:
+	/* empty */
+	{
+		$$ = ""
+	}
+|	"DDL"
+	{
+		$$ = string($1)
 	}
 
 /****************************Show Statement*******************************/

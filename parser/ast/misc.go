@@ -2228,6 +2228,8 @@ const (
 	AdminResetTelemetryID
 	AdminReloadStatistics
 	AdminFlushPlanCache
+	AdminPause
+	AdminResume
 )
 
 // HandleRange represents a range where handle value >= Begin and < End.
@@ -2323,6 +2325,8 @@ type AdminStmt struct {
 	Where          ExprNode
 	StatementScope StatementScope
 	LimitSimple    LimitSimple
+	TaskType       string
+	Force          bool
 }
 
 // Restore implements Node interface.
@@ -2471,6 +2475,15 @@ func (n *AdminStmt) Restore(ctx *format.RestoreCtx) error {
 		} else if n.StatementScope == StatementScopeGlobal {
 			ctx.WriteKeyWord("FLUSH GLOBAL PLAN_CACHE")
 		}
+	case AdminPause:
+		ctx.WriteKeyWord("Pause ")
+		ctx.WriteKeyWord(n.TaskType)
+		if n.Force {
+			ctx.WriteKeyWord("Force")
+		}
+	case AdminResume:
+		ctx.WriteKeyWord("Resume ")
+		ctx.WriteKeyWord(n.TaskType)
 	default:
 		return errors.New("Unsupported AdminStmt type")
 	}

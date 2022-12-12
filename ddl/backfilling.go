@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
+	res "github.com/pingcap/tidb/resourcemanager"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/store/copr"
@@ -108,7 +109,7 @@ func (bj *BackfillJob) AbbrStr() string {
 }
 
 // GetOracleTime returns the current time from TS.
-func GetOracleTime(se *session) (time.Time, error) {
+func GetOracleTime(se *res.Session) (time.Time, error) {
 	txn, err := se.Txn(true)
 	if err != nil {
 		return time.Time{}, err
