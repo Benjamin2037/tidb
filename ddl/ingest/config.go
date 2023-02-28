@@ -36,7 +36,7 @@ type Config struct {
 	KeyspaceName string
 }
 
-func genConfig(memRoot MemRoot, jobID int64, unique bool) (*Config, error) {
+func genConfig(memRoot MemRoot, jobID int64, unique bool, indexNum int64) (*Config, error) {
 	tidbCfg := tidb.GetGlobalConfig()
 	cfg := lightning.NewConfig()
 	cfg.TikvImporter.Backend = lightning.BackendLocal
@@ -50,7 +50,7 @@ func genConfig(memRoot MemRoot, jobID int64, unique bool) (*Config, error) {
 		logutil.BgLogger().Warn(LitWarnConfigError, zap.Error(err))
 		return nil, err
 	}
-	adjustImportMemory(memRoot, cfg)
+	adjustImportMemory(memRoot, cfg, indexNum)
 	cfg.Checkpoint.Enable = true
 	if unique {
 		cfg.TikvImporter.DuplicateResolution = lightning.DupeResAlgErr
@@ -94,7 +94,7 @@ func generateLocalEngineConfig(id int64, dbName, tbName string) *backend.EngineC
 }
 
 // adjustImportMemory adjusts the lightning memory parameters according to the memory root's max limitation.
-func adjustImportMemory(memRoot MemRoot, cfg *lightning.Config) {
+func adjustImportMemory(memRoot MemRoot, cfg *lightning.Config, indexNum int64) {
 	var scale int64
 	// Try aggressive resource usage successful.
 	if tryAggressiveMemory(memRoot, cfg) {
@@ -108,6 +108,7 @@ func adjustImportMemory(memRoot MemRoot, cfg *lightning.Config) {
 		zap.Int64("engine memory cache size", int64(cfg.TikvImporter.EngineMemCacheSize)),
 		zap.Int("range concurrency", cfg.TikvImporter.RangeConcurrency))
 
+	defaultMemSize *= indexNum
 	maxLimit := memRoot.MaxMemoryQuota()
 	scale = defaultMemSize / maxLimit
 

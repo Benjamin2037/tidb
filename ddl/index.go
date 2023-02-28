@@ -853,7 +853,7 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 				return false, ver, nil
 			}
 			// TODO, always use flase for now, need to support transfer bool slices for lwCtx
-			bc, err = ingest.LitBackCtxMgr.Register(w.ctx, false, job.ID, job.ReorgMeta.SQLMode)
+			bc, err = ingest.LitBackCtxMgr.Register(w.ctx, false, job.ID, len(indexesInfo), job.ReorgMeta.SQLMode)
 			if err != nil {
 				err = tryFallbackToTxnMerge(job, err)
 				return false, ver, errors.Trace(err)
@@ -868,22 +868,24 @@ func doReorgWorkForCreateIndex(w *worker, d *ddlCtx, t *meta.Meta, job *model.Jo
 				return false, ver, nil
 			}
 			// TODO, always use false for now, need to support transfer bool slices for lwCtx
-			err = bc.FinishImport(indexesInfo[0].ID, false, tbl)
-			if err != nil {
-				if kv.ErrKeyExists.Equal(err) || common.ErrFoundDuplicateKeys.Equal(err) {
-					logutil.BgLogger().Warn("[ddl] import index duplicate key, convert job to rollback", zap.String("job", job.String()), zap.Error(err))
-					/*
-						if common.ErrFoundDuplicateKeys.Equal(err) {
-							err = convertToKeyExistsErr(err, indexInfo, tbl.Meta())
-						}
-					*/
-					ver, err = convertAddIdxJob2RollbackJob(d, t, job, tbl.Meta(), indexesInfo, err)
-				} else {
-					logutil.BgLogger().Warn("[ddl] lightning import error", zap.Error(err))
-					err = tryFallbackToTxnMerge(job, err)
+			for _, idxInfo := range indexesInfo {
+				err = bc.FinishImport(idxInfo.ID, false, tbl)
+				if err != nil {
+					if kv.ErrKeyExists.Equal(err) || common.ErrFoundDuplicateKeys.Equal(err) {
+						logutil.BgLogger().Warn("[ddl] import index duplicate key, convert job to rollback", zap.String("job", job.String()), zap.Error(err))
+						/*
+							if common.ErrFoundDuplicateKeys.Equal(err) {
+								err = convertToKeyExistsErr(err, indexInfo, tbl.Meta())
+							}
+						*/
+						ver, err = convertAddIdxJob2RollbackJob(d, t, job, tbl.Meta(), indexesInfo, err)
+					} else {
+						logutil.BgLogger().Warn("[ddl] lightning import error", zap.Error(err))
+						err = tryFallbackToTxnMerge(job, err)
+					}
+					ingest.LitBackCtxMgr.Unregister(job.ID)
+					return false, ver, errors.Trace(err)
 				}
-				ingest.LitBackCtxMgr.Unregister(job.ID)
-				return false, ver, errors.Trace(err)
 			}
 			bc.SetDone()
 		case model.ReorgTypeTxnMerge:
@@ -1391,14 +1393,16 @@ func newAddIndexWorker(decodeColMap map[int64]decoder.Column, t table.PhysicalTa
 		if !ok {
 			return nil, errors.Trace(errors.New(ingest.LitErrGetBackendFail))
 		}
-		ei, err := bc.EngMgr.Register(bc, jobID, elements[0].ID, bfCtx.schemaName, t.Meta().Name.O)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		// TODO, always use false for now, need to support transfer bool slices for lwCtx
-		lwCtx, err = ei.NewWriterCtx(bfCtx.id, false)
-		if err != nil {
-			return nil, err
+		for _, ele := range elements {
+			ei, err := bc.EngMgr.Register(bc, jobID, ele.ID, bfCtx.schemaName, t.Meta().Name.O)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			// TODO, always use false for now, need to support transfer bool slices for lwCtx
+			lwCtx, err = ei.NewWriterCtx(bfCtx.id, false)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1789,9 +1793,11 @@ func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskC
 		taskCtx.nextKey = nextKey
 		taskCtx.done = taskDone
 
-		err = w.batchCheckUniqueKey(txn, idxRecords)
-		if err != nil {
-			return errors.Trace(err)
+		if w.writerCtx == nil {
+			err = w.batchCheckUniqueKey(txn, idxRecords)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		for i, idxRecord := range idxRecords {
@@ -2169,7 +2175,7 @@ func (w *worker) updateReorgInfoForPartitions(t table.PartitionedTable, reorg *r
 }
 
 func runBackfillJobsWithLightning(d *ddl, sess *session, bfJob *BackfillJob, jobCtx *JobContext) error {
-	bc, err := ingest.LitBackCtxMgr.Register(d.ctx, bfJob.Meta.IsUnique, bfJob.JobID, bfJob.Meta.SQLMode)
+	bc, err := ingest.LitBackCtxMgr.Register(d.ctx, bfJob.Meta.IsUnique, bfJob.JobID, 1, bfJob.Meta.SQLMode)
 	if err != nil {
 		logutil.BgLogger().Warn("[ddl] lightning register error", zap.Error(err))
 		return err
