@@ -1364,7 +1364,7 @@ type baseIndexWorker struct {
 type addIndexWorker struct {
 	baseIndexWorker
 	index            table.Index
-	writerCtx        *ingest.WriterContext
+	writerCtx        []*ingest.WriterContext
 	copReqSenderPool *copReqSenderPool
 
 	// The following attributes are used to reduce memory allocation.
@@ -1388,6 +1388,7 @@ func newAddIndexWorker(decodeColMap map[int64]decoder.Column, t table.PhysicalTa
 	rowDecoder := decoder.NewRowDecoder(t, t.WritableCols(), decodeColMap)
 
 	var lwCtx *ingest.WriterContext
+	var lwCtxs []*ingest.WriterContext
 	if bfCtx.reorgTp == model.ReorgTypeLitMerge {
 		bc, ok := ingest.LitBackCtxMgr.Load(jobID)
 		if !ok {
@@ -1403,6 +1404,7 @@ func newAddIndexWorker(decodeColMap map[int64]decoder.Column, t table.PhysicalTa
 			if err != nil {
 				return nil, err
 			}
+			lwCtxs = append(lwCtxs, lwCtx)
 		}
 	}
 
@@ -1417,7 +1419,7 @@ func newAddIndexWorker(decodeColMap map[int64]decoder.Column, t table.PhysicalTa
 			jobContext:    jc,
 		},
 		index:     indexes[0],
-		writerCtx: lwCtx,
+		writerCtx: lwCtxs,
 	}, nil
 }
 
@@ -1834,16 +1836,19 @@ func (w *addIndexWorker) BackfillDataInTxn(handleRange reorgBackfillTask) (taskC
 				vars := w.sessCtx.GetSessionVars()
 				sCtx, writeBufs := vars.StmtCtx, vars.GetWriteStmtBufs()
 				iter := w.indexes[i%len(w.indexes)].GenIndexKVIter(sCtx, idxRecord.vals, idxRecord.handle, idxRecord.rsData)
+				i := 0
 				for iter.Valid() {
 					key, idxVal, _, err := iter.Next(writeBufs.IndexKeyBuf)
 					if err != nil {
 						return errors.Trace(err)
 					}
+					ei := ingest.liteng
 					err = w.writerCtx.WriteRow(key, idxVal)
 					if err != nil {
 						return errors.Trace(err)
 					}
 					writeBufs.IndexKeyBuf = key
+					i++
 				}
 			}
 			taskCtx.addedCount++
