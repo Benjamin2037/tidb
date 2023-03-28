@@ -15,6 +15,8 @@
 package globaldataservice
 
 import (
+	"encoding/binary"
+
 	"github.com/pingcap/tidb/disttask/framework/proto"
 )
 
@@ -29,12 +31,50 @@ type RedistributeDataService interface {
 	CleanupDataServiceEnv()
 }
 
-func BuildRoutingTable(jobID, tableID, indexID, TaskType, keyStart, keyEnd, DataServiceType string) (*proto.DataServiceMeta, error) {
+func BuildRoutingTable(jobID, tableID, indexID, TaskType, DataServiceType string, keyStart, keyEnd []byte) (*proto.DataServiceMeta, error) {
 	var (
 		DSMeta *proto.DataServiceMeta
 		err error
 	)
+	DSMeta = &proto.DataServiceMeta{
+		JobID: jobID,
+		TableID: tableID,
+		IndexID: indexID,
+		TaskType: TaskType,
+		KeyStart: keyStart,
+		KeyEnd: keyEnd,
+	}
 	return  DSMeta, err
 } 
 
+// SplitRange used to split a range of key by input number of compute node.
+func SplitRange(startKey, endKey []byte, numNodes int) [][]byte {
+    var result [][]byte
+    rangeSize := int(binary.BigEndian.Uint64(endKey)) - int(binary.BigEndian.Uint64(startKey))
+    chunkSize := rangeSize / numNodes
 
+    for i := 0; i < numNodes; i++ {
+        var chunkStart, chunkEnd []byte
+
+        if i == 0 {
+            chunkStart = startKey
+        } else {
+            chunkStart = make([]byte, len(startKey))
+            copy(chunkStart, startKey)
+            binary.BigEndian.PutUint64(chunkStart, binary.BigEndian.Uint64(chunkStart)+uint64(chunkSize*i))
+        }
+
+        if i == numNodes-1 {
+            chunkEnd = endKey
+        } else {
+            chunkEnd = make([]byte, len(endKey))
+            copy(chunkEnd, startKey)
+            binary.BigEndian.PutUint64(chunkEnd, binary.BigEndian.Uint64(chunkEnd)+uint64(chunkSize*(i+1)))
+        }
+
+        result = append(result, chunkStart)
+        result = append(result, chunkEnd)
+    }
+
+    return result
+}
