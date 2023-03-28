@@ -38,6 +38,7 @@ type LitBackfillGlobalTaskMeta struct {
 	Job        model.Job `json:"job"`
 	EleID      int64     `json:"ele_id"`
 	EleTypeKey []byte    `json:"ele_type_key"`
+	DataSrvMeta proto.DataServiceMeta `json:"data_service_meta"`
 }
 
 // LitBackfillSubTaskMeta is the subtask meta for lightning backfill.
@@ -111,4 +112,13 @@ func (h *litBackfillFlowHandle) ProcessNormalFlow(_ dispatcher.Dispatch, gTask *
 func (*litBackfillFlowHandle) ProcessErrFlow(_ dispatcher.Dispatch, _ *proto.Task, _ string) (meta []byte, err error) {
 	// We do not need extra meta info when rolling back
 	return nil, nil
+}
+
+// GlobalDataServiceChecker used to decide whether specific step of global task need global data service to process data.
+func GlobalDataServiceChecker(taskType string, tableInfo model.TableInfo) bool {
+	if (taskType == proto.TaskTypeImport || taskType == proto.TaskTypeDDL) && tableInfo.Partition == nil {
+        // If the table is non-partition table, then currently, global data redistribute data service should be used.
+        return true
+	}
+	return false
 }

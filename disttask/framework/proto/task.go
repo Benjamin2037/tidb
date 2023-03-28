@@ -96,6 +96,10 @@ type MinimalTask interface {
 const (
 	// TaskTypeExample is TaskType of Example.
 	TaskTypeExample = "Example"
+	TaskTypeDDL = "TaskTypeDDL"
+	TaskTypeImport = "TaskTypeImport"
+	TaskTypeTTL = "TaskTypeTTL"
+	TaskTypeAnalyze = "TaskTypeAnalyze"
 )
 
 // Type2Int converts task type to int.

@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "globaldataservice",
+    srcs = ["redistribute.go"],
+    importpath = "github.com/pingcap/tidb/disttask/globaldataservice",
+    visibility = ["//visibility:public"],
+    deps = ["//disttask/framework/proto"],
+)
+
+go_test(
+    name = "globaldataservice_test",
+    srcs = ["redistribute_test.go"],
+)
