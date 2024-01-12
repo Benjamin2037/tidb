@@ -1676,3 +1676,79 @@ func (e *TiKVRegionStatusExtractor) explainInfo(_ *PhysicalMemTable) string {
 func (e *TiKVRegionStatusExtractor) GetTablesID() []int64 {
 	return e.tablesID
 }
+
+type PredicateType int
+
+const (
+	COLUMNPREDICATE PredicateType = iota
+	ColUMNLIKEPREDICATE
+)
+
+// InfoSchemaTablesExtract is used to extract Tables related predictions
+type InfoSchemaTablesExtract struct {
+	extractHelper
+
+	initialized bool
+	// SkipRequest means the where clause always false, we don't need to request any component
+	skipRequest bool
+
+	colNames []string
+
+	colPredicates map[string]set.StringSet
+}
+
+func (b *InfoSchemaTablesExtract) initialize() {
+	b.colNames = append(b.colNames, "table_schema")
+	b.colNames = append(b.colNames, "table_name")
+	b.colPredicates = make(map[string]set.StringSet)
+	b.initialized = true
+}
+
+func (b *InfoSchemaTablesExtract) Extract(_ sessionctx.Context,
+	schema *expression.Schema,
+	names []*types.FieldName,
+	predicates []expression.Expression,
+) (remained []expression.Expression) {
+	var resultSet set.StringSet
+	if !b.initialized {
+		b.initialize()
+	}
+	remained = predicates
+	for _, colName := range b.colNames {
+		remained, b.skipRequest, resultSet = b.extractCol(schema, names, remained, colName, true)
+		if b.skipRequest {
+			return
+		}
+		b.colPredicates[colName] = resultSet
+	}
+	return remained
+}
+
+func (b *InfoSchemaTablesExtract) explainInfo(_ *PhysicalMemTable) string {
+	if b.skipRequest {
+		return "skip_request:true"
+	}
+	r := new(bytes.Buffer)
+	for colName, colPredicate := range b.colPredicates {
+		fmt.Fprintf(r, "%s:[%s], ", colName, extractStringFromStringSet(colPredicate))
+	}
+
+	// remove the last ", " in the message info
+	s := r.String()
+	if len(s) > 2 {
+		return s[:len(s)-2]
+	}
+	return s
+}
+
+func (b *InfoSchemaTablesExtract) ApplyFilter(colName string, any interface{}) bool {
+	if b.skipRequest {
+		return true
+	}
+	value, ok := b.colPredicates[colName]
+	predVal := any.(string)
+	if ok {
+		return value.Exist(predVal)
+	}
+	return false
+}

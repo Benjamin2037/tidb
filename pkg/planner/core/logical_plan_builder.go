@@ -5459,6 +5459,11 @@ func (b *PlanBuilder) buildMemTable(_ context.Context, dbName model.CIStr, table
 			p.Extractor = &ColumnsTableExtractor{}
 		case infoschema.TableTiKVRegionStatus:
 			p.Extractor = &TiKVRegionStatusExtractor{tablesID: make([]int64, 0)}
+		case infoschema.TableTables,
+			infoschema.TableReferConst,
+			infoschema.TableKeyColumn,
+			infoschema.TableStatistics:
+			p.Extractor = &InfoSchemaTablesExtract{}
 		}
 	}
 	return p, nil

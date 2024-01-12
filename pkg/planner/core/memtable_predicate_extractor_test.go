@@ -1810,3 +1810,38 @@ func TestExtractorInPreparedStmt(t *testing.T) {
 		ca.checker(extractor)
 	}
 }
+
+func TestInformSchemaTableExtract(t *testing.T) {
+	store, dom := testkit.CreateMockStoreAndDomain(t)
+
+	se, err := session.CreateSession4Test(store)
+	require.NoError(t, err)
+	var cases = []struct {
+		sql         string
+		paraMarks   []interface{}
+		tableSchema []string
+		tableName   []string
+	}{
+		{
+			sql:         "SELECT  `fk`.`referenced_table_name` ,  `fk`.`referenced_column_name`,  `fk`.`column_name` , `fk`.`constraint_name`, `rc`.`update_rule` , `rc`.`delete_rule` FROM  `information_schema`.`referential_constraints` `rc`  JOIN `information_schema`.`key_column_usage` `fk` USING (`constraint_schema`, `constraint_name`) WHERE  `fk`.`referenced_column_name` IS NOT ?  AND `fk`.`table_schema` = DATABASE ()  AND `fk`.`table_name` = ?  AND `rc`.`constraint_schema` = DATABASE ()  AND `rc`.`table_name` = ?;",
+			paraMarks:   []interface{}{"a", "t1", "t1"},
+			tableSchema: []string{"test"},
+			tableName:   []string{"t1", "t2"},
+		},
+		{
+			sql:         "SELECT  `column_name` FROM  `information_schema`.`statistics` WHERE  `index_name` = ?  AND `table_schema` = DATABASE ()  AND `table_name` = ? ORDER BY  `seq_in_index`;",
+			paraMarks:   []interface{}{"idx1", "t1"},
+			tableSchema: []string{"test"},
+			tableName:   []string{"t1"},
+		},
+		{},
+	}
+	parser := parser.New()
+	for _, ca := range cases {
+		logicalMemTable := getLogicalMemTable(t, dom, se, parser, ca.sql)
+		require.NotNil(t, logicalMemTable.Extractor)
+
+		infoSchemaTablesExtractor := logicalMemTable.Extractor.(*plannercore.InfoSchemaTablesExtract)
+
+	}
+}

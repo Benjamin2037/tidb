@@ -2067,11 +2067,8 @@ func (b *executorBuilder) buildMemTable(v *plannercore.PhysicalMemTable) exec.Ex
 				},
 			}
 		case strings.ToLower(infoschema.TableSchemata),
-			strings.ToLower(infoschema.TableStatistics),
 			strings.ToLower(infoschema.TableTiDBIndexes),
 			strings.ToLower(infoschema.TableViews),
-			strings.ToLower(infoschema.TableTables),
-			strings.ToLower(infoschema.TableReferConst),
 			strings.ToLower(infoschema.TableSequences),
 			strings.ToLower(infoschema.TablePartitions),
 			strings.ToLower(infoschema.TableEngines),
@@ -2080,7 +2077,6 @@ func (b *executorBuilder) buildMemTable(v *plannercore.PhysicalMemTable) exec.Ex
 			strings.ToLower(infoschema.TableClusterInfo),
 			strings.ToLower(infoschema.TableProfiling),
 			strings.ToLower(infoschema.TableCharacterSets),
-			strings.ToLower(infoschema.TableKeyColumn),
 			strings.ToLower(infoschema.TableUserPrivileges),
 			strings.ToLower(infoschema.TableMetricTables),
 			strings.ToLower(infoschema.TableCollationCharacterSetApplicability),
@@ -2118,6 +2114,19 @@ func (b *executorBuilder) buildMemTable(v *plannercore.PhysicalMemTable) exec.Ex
 					table:     v.Table,
 					columns:   v.Columns,
 					extractor: v.Extractor,
+				},
+			}
+		case strings.ToLower(infoschema.TableTables),
+			strings.ToLower(infoschema.TableReferConst),
+			strings.ToLower(infoschema.TableKeyColumn),
+			strings.ToLower(infoschema.TableStatistics):
+			return &MemTableReaderExec{
+				BaseExecutor: exec.NewBaseExecutor(b.ctx, v.Schema(), v.ID()),
+				table:        v.Table,
+				retriever: &memtableRetriever{
+					table:     v.Table,
+					columns:   v.Columns,
+					extractor: v.Extractor.(*plannercore.InfoSchemaTablesExtract),
 				},
 			}
 		case strings.ToLower(infoschema.TableTiDBTrx),
