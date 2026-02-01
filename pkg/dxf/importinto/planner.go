@@ -628,11 +628,32 @@ func generatePlanTouchedRegionsSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([
 		deltaFiles = dataMeta.GetDataFiles()
 	}
 	baseID := p.Plan.BaseVersion
+	baseManifestPath := ""
+	baseURI := p.Plan.BaseURI
+	if baseURI == "" {
+		baseURI = p.Plan.CloudStorageURI
+	}
+	if baseID == "" && p.Plan.AutoResolveBase {
+		baseStore, err := importer.GetSortStore(planCtx.Ctx, baseURI)
+		if err != nil {
+			return nil, err
+		}
+		defer baseStore.Close()
+		baseID, baseManifestPath, err = ResolveLatestBaseManifest(planCtx.Ctx, baseStore)
+		if err != nil {
+			if !errors.ErrorEqual(err, ErrBaseManifestNotFound) {
+				return nil, err
+			}
+		}
+	}
+	if baseManifestPath == "" && baseID != "" {
+		baseManifestPath = BaseManifestPath(baseID)
+	}
 	spec := &PlanTouchedRegionsSpec{
 		PlanTouchedRegionsStepMeta: &PlanTouchedRegionsStepMeta{
 			BaseID:             baseID,
-			BaseURI:            p.Plan.BaseURI,
-			BaseManifestPath:   BaseManifestPath(baseID),
+			BaseURI:            baseURI,
+			BaseManifestPath:   baseManifestPath,
 			DeltaStoreURI:      p.Plan.CloudStorageURI,
 			DeltaDataFiles:     deltaFiles,
 			DeltaStartKey:      deltaStartKey,
@@ -660,12 +681,33 @@ func generateRegionMergeSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([]planne
 		deltaFiles = dataMeta.GetDataFiles()
 	}
 	baseID := p.Plan.BaseVersion
+	baseManifestPath := ""
+	baseURI := p.Plan.BaseURI
+	if baseURI == "" {
+		baseURI = p.Plan.CloudStorageURI
+	}
+	if baseID == "" && p.Plan.AutoResolveBase {
+		baseStore, err := importer.GetSortStore(planCtx.Ctx, baseURI)
+		if err != nil {
+			return nil, err
+		}
+		defer baseStore.Close()
+		baseID, baseManifestPath, err = ResolveLatestBaseManifest(planCtx.Ctx, baseStore)
+		if err != nil {
+			if !errors.ErrorEqual(err, ErrBaseManifestNotFound) {
+				return nil, err
+			}
+		}
+	}
+	if baseManifestPath == "" && baseID != "" {
+		baseManifestPath = BaseManifestPath(baseID)
+	}
 	outputBaseID := "base-" + strconv.FormatInt(p.JobID, 10)
 	spec := &RegionMergeSpec{
 		RegionMergeStepMeta: &RegionMergeStepMeta{
 			BaseID:             baseID,
-			BaseURI:            p.Plan.BaseURI,
-			BaseManifestPath:   BaseManifestPath(baseID),
+			BaseURI:            baseURI,
+			BaseManifestPath:   baseManifestPath,
 			DeltaStoreURI:      p.Plan.CloudStorageURI,
 			DeltaDataFiles:     deltaFiles,
 			ChangedRegionsPath: ChangedRegionsPath(p.JobID),

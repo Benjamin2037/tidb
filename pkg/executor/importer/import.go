@@ -308,6 +308,7 @@ type Plan struct {
 	BaseVersion           string
 	BaseURI               string
 	MergeStrategy         MergeStrategy
+	AutoResolveBase       bool
 
 	// used for checksum in physical mode
 	DistSQLScanConcurrency int
@@ -1002,7 +1003,8 @@ func (p *Plan) initOptions(ctx context.Context, seCtx sessionctx.Context, option
 			p.BaseURI = p.CloudStorageURI
 		}
 		if p.IsUpsertDelta() && p.BaseVersion == "" {
-			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(baseVersionOption)
+			p.AutoResolveBase = true
+			seCtx.GetSessionVars().StmtCtx.AppendWarning(errors.New("IMPORT INTO WITH delta without base_version, auto-resolve base manifest from external storage; if missing, fallback to remote coprocessor scan on S3 SSTs"))
 		}
 		if p.MergeStrategy == "" {
 			p.MergeStrategy = MergeStrategyLastWriteWins

@@ -229,7 +229,9 @@ func TestInitOptionsUpsertMode(t *testing.T) {
 	require.NoError(t, err, sql)
 	plan = &Plan{Format: DataFormatCSV}
 	err = plan.initOptions(ctx, sctx, convertOptions(stmt.(*ast.ImportIntoStmt).Options))
-	require.Error(t, err)
+	require.NoError(t, err)
+	require.True(t, plan.AutoResolveBase)
+	require.NotEmpty(t, sctx.GetSessionVars().StmtCtx.GetWarnings())
 
 	sql = "import into t from '/file.csv' with base_version='base-1', cloud_storage_uri='s3://bucket/data'"
 	stmt, err = p.ParseOneStmt(sql, "", "")
