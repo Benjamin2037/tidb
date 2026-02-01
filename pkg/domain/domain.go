@@ -1082,6 +1082,9 @@ func (do *Domain) InitDistTaskLoop() error {
 		// in nextgen, DXF runs as a service on SYSTEM ks and are shared by all
 		// user keyspace
 		logutil.BgLogger().Info("skip running DXF in user keyspace")
+		if StartImportIntoCompactionWorker != nil {
+			StartImportIntoCompactionWorker(do, do.wg.Run, do.exit)
+		}
 		return nil
 	}
 	if kv.IsSystemKS(do.store) {
@@ -1150,6 +1153,9 @@ func (do *Domain) InitDistTaskLoop() error {
 		return local.InitializeRateLimiterParam(m, logger)
 	}); err != nil {
 		logutil.BgLogger().Error("initialize global max batch split ranges failed", zap.Error(err))
+	}
+	if StartImportIntoCompactionWorker != nil {
+		StartImportIntoCompactionWorker(do, do.wg.Run, do.exit)
 	}
 	return nil
 }
