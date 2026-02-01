@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/tidb/pkg/meta/model"
 	"github.com/pingcap/tidb/pkg/parser/mysql" //nolint: goimports
 	"github.com/pingcap/tidb/pkg/table"
+	"github.com/pingcap/tidb/pkg/tablecodec"
 	"github.com/pingcap/tidb/pkg/types"
 	"github.com/pingcap/tidb/pkg/util/chunk"
 )
@@ -42,6 +43,8 @@ type TableKVEncoder struct {
 	insertColumnRowCache []types.Datum
 	rowCache             []types.Datum
 	hasValueCache        []bool
+
+	enableDeltaRowEncoding bool
 }
 
 // NewTableKVEncoder creates a new TableKVEncoder.
@@ -50,7 +53,7 @@ func NewTableKVEncoder(
 	config *encode.EncodingConfig,
 	ctrl *LoadDataController,
 ) (*TableKVEncoder, error) {
-	return newTableKVEncoderInner(config, ctrl, ctrl.FieldMappings, ctrl.InsertColumns)
+	return newTableKVEncoderInner(config, ctrl, ctrl.FieldMappings, ctrl.InsertColumns, true)
 }
 
 // NewTableKVEncoderForDupResolve creates a new TableKVEncoder for duplicate resolution.
@@ -59,7 +62,7 @@ func NewTableKVEncoderForDupResolve(
 	ctrl *LoadDataController,
 ) (*TableKVEncoder, error) {
 	mappings, _ := ctrl.tableVisCols2FieldMappings()
-	return newTableKVEncoderInner(config, ctrl, mappings, ctrl.Table.VisibleCols())
+	return newTableKVEncoderInner(config, ctrl, mappings, ctrl.Table.VisibleCols(), false)
 }
 
 func newTableKVEncoderInner(
@@ -67,6 +70,7 @@ func newTableKVEncoderInner(
 	ctrl *LoadDataController,
 	fieldMappings []*FieldMapping,
 	insertColumns []*table.Column,
+	enableDeltaEncoding bool,
 ) (*TableKVEncoder, error) {
 	baseKVEncoder, err := kv.NewBaseKVEncoder(config)
 	if err != nil {
@@ -82,6 +86,7 @@ func newTableKVEncoderInner(
 		columnAssignments: colAssignExprs,
 		fieldMappings:     fieldMappings,
 		insertColumns:     insertColumns,
+		enableDeltaRowEncoding: enableDeltaEncoding && ctrl.UpsertMode == UpsertModeDelta,
 	}, nil
 }
 
@@ -97,6 +102,38 @@ func (en *TableKVEncoder) Encode(row []types.Datum, rowID int64) (*kv.Pairs, err
 		return nil, err
 	}
 
+	kvPairs, err := en.Record2KV(record, row, rowID)
+	if err != nil {
+		return nil, err
+	}
+	if en.enableDeltaRowEncoding {
+		bitmap := BuildColumnBitmap(en.hasValueCache)
+		for i := range kvPairs.Pairs {
+			if tablecodec.IsRecordKey(kvPairs.Pairs[i].Key) {
+				kvPairs.Pairs[i].Val = EncodeDeltaRowValue(kvPairs.Pairs[i].Val, bitmap)
+			}
+		}
+	}
+	return kvPairs, nil
+}
+
+// EncodeFromDatumRow encodes a full datum row (ordered by column offset) into KV pairs.
+func (en *TableKVEncoder) EncodeFromDatumRow(row []types.Datum, rowID int64) (*kv.Pairs, error) {
+	if len(row) < len(en.Columns) {
+		return nil, errors.New("datum row length is less than column count")
+	}
+	row = row[:len(en.Columns)]
+	if cap(en.hasValueCache) < len(en.Columns) {
+		en.hasValueCache = make([]bool, len(en.Columns))
+	}
+	hasValue := en.hasValueCache[:len(en.Columns)]
+	for i := range hasValue {
+		hasValue[i] = true
+	}
+	record, err := en.fillRow(row, hasValue, rowID)
+	if err != nil {
+		return nil, err
+	}
 	return en.Record2KV(record, row, rowID)
 }
 
