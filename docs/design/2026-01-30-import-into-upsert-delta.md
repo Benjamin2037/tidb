@@ -40,7 +40,7 @@
 复用 IMPORT INTO 的 WITH 选项解析，新增如下选项：
 
 - `WITH full`：一次导入后保留 sorted KV 为 base，生成 Base Manifest。
-- `WITH delta`：基于 base 做增量 upsert，生成新 base，并自动 ingest 变更 region。
+- `WITH delta`：基于 base 做增量 upsert，生成新 base，并自动 ingest 变更 region；若缺少 base_version 则告警并回退为 remote coprocessor 读取 S3 SST。
 - `base_version='v...'`：指定基线版本（可选）。
 - `base_uri='s3://...'`：指定基线路径（可选）。
 - `merge_strategy='last_write_wins'|'max_ts'`：delta 内同主键多条记录的归并策略。
@@ -48,7 +48,7 @@
 约束：
 
 - full/delta 只能走 global sort（`CloudStorageURI` 必须存在）。
-- 若缺少 base（或 base_version/base_uri 不存在），`WITH delta` 报错。
+- 若缺少 base_version，则 `WITH delta` 产生告警并回退为 remote coprocessor 读取 S3 SST。
 
 ### 流水线设计
 
@@ -92,7 +92,7 @@ StepInit
 
 ### RegionMerge 合并算法
 
-对每个变更 region，读取 base + delta 的 data KV 进行行级合并，并重建 data/index KV：
+对每个变更 region，读取 base + delta 的 data KV 进行行级合并，并重建 data/index KV。若缺少 base manifest，则通过 remote coprocessor 直接扫描 S3 上对应 region 的 SST：
 
 1. 根据主键排序并合并。
 2. 若 base 行存在，delta 行仅覆盖出现列。
@@ -102,7 +102,7 @@ StepInit
 
 ### Changed Regions 规划与自动 ingest
 
-PlanTouchedRegions 基于 delta KV key ranges 与 base manifest 的 region 边界求交，输出 `changed_regions.json`。
+PlanTouchedRegions 基于 delta KV key ranges 与 base manifest 的 region 边界求交，输出 `changed_regions.json`。若缺少 base manifest，则退化为全量范围（空 start/end），确保输出完整 base。
 
 IngestChangedRegions 读取 `changed_regions.json` 与新 base manifest，按 region 范围仅 ingest 变更 region 的 data/index KV。该步骤自动执行，不引入 `ADMIN INGEST` 等人工命令。
 
@@ -190,7 +190,7 @@ Changed Regions Manifest：
 
 ### Functional Tests
 
-- `WITH full/delta` 选项解析与互斥检查。
+- `WITH full/delta` 选项解析与互斥检查；delta 无 base_version 时告警并启用 S3 SST remote coprocessor 扫描。
 - Base/Changed Regions manifest 读写与内容正确性。
 - Delta pipeline 步骤序列与自动 ingest。
 - `SHOW IMPORT BASES/REGIONS/CHANGED` 输出校验。
@@ -200,7 +200,7 @@ Changed Regions Manifest：
 
 - 宽表部分列更新（稀疏更新）正确性。
 - delta 内重复主键记录按 `merge_strategy` 归并。
-- 无 base 或 base_version 不存在时返回错误。
+- 无 base_version 时告警并回退 S3 SST remote coprocessor 扫描。
 - 失败重试不影响 base 版本一致性。
 
 ### Compatibility Tests
