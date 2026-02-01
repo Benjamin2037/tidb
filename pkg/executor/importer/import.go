@@ -371,6 +371,14 @@ type Summary struct {
 	// cannot deduplicate during collecting its checksum, so we will skip later
 	// checksum step.
 	TooManyConflicts bool `json:"too-many-conflicts,omitempty"`
+
+	// Base manifest info for upsert full/delta.
+	BaseID           string `json:"base-id,omitempty"`
+	BaseURI          string `json:"base-uri,omitempty"`
+	BaseManifestPath string `json:"base-manifest-path,omitempty"`
+
+	// ChangedRegionsPath stores the delta changed regions manifest path.
+	ChangedRegionsPath string `json:"changed-regions-path,omitempty"`
 }
 
 // LoadDataController load data controller.
