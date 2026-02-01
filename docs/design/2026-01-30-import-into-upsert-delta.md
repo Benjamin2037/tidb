@@ -205,6 +205,7 @@ Changed Regions Manifest：
 - **GC 策略**：仅删除超过保留期的 base/delta 版本与孤儿对象，确保回滚窗口内数据可追溯。
 
 存储量近似公式：`Total ≈ Base + RetentionDays × DailyChanged`（仅统计变更 region 文件，不含临时文件开销）。
+示例（默认 10 天、DailyChanged=175TB）：`Total ≈ 175 + 10×175 = 1,925 TB`。
 该策略在控制存储成本的同时，避免频繁回写导致的版本碎片化，降低长期 merge 风险。
 
 ## Test Design
