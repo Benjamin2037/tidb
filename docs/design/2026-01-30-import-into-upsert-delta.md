@@ -197,12 +197,14 @@ Changed Regions Manifest：
 
 为支持审计/回滚与追溯风险控制，允许保留多天 base+delta 版本；保留期结束后，通过后台 DXF 任务做版本 compaction：
 
+- **保留窗口**：默认保留 10 天版本（可配置），用于回滚与审计。
 - **触发方式**：由系统定时或策略触发（例如保留 N 天版本后执行），对用户无感知。
 - **输入**：保留期内的 base manifest 与对应 delta 产物（或已产出的新 base 版本）。
 - **输出**：生成新的 compacted base manifest（合并范围/减少小文件），并更新“最新 base 指针”。
 - **一致性保障**：compaction 完成前不删除旧版本；完成后对新 manifest 做校验（checksum/row_count/bytes），再执行 GC。
 - **GC 策略**：仅删除超过保留期的 base/delta 版本与孤儿对象，确保回滚窗口内数据可追溯。
 
+存储量近似公式：`Total ≈ Base + RetentionDays × DailyChanged`（仅统计变更 region 文件，不含临时文件开销）。
 该策略在控制存储成本的同时，避免频繁回写导致的版本碎片化，降低长期 merge 风险。
 
 ## Test Design
