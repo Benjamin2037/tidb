@@ -173,8 +173,15 @@ Changed Regions Manifest：
 - GET：$0.0004 / 1000
 - PUT：$0.005 / 1000
 - 基于字节数的 objstore/cluster 成本默认 0（预留扩展）
+- S3 Standard 存储基线：约 $0.023/GB-月（不同 region/阶梯价格可能有差异）
+- 同区域 S3 到计算节点内网传输不计费；跨区域/公网出流另计
 
 计量聚合粒度为 metering flush interval（当前实现按分钟）。
+
+### 175TB 存储成本示例（S3 Standard）
+- 单份 base（175 TB ≈ 175,000 GB）：约 $4,025/月
+- 若保留 1 份 base + 当日 delta（35 TB）：约 $4,830/月
+- 若保留 10 天 delta（350 TB）：约 $12,075/月
 
 ### 权限与安全
 
