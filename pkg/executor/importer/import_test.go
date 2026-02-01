@@ -184,6 +184,62 @@ func TestInitOptionsPositiveCase(t *testing.T) {
 	require.Equal(t, "", plan.CloudStorageURI, sql4)
 }
 
+func TestInitOptionsUpsertMode(t *testing.T) {
+	sctx := mock.NewContext()
+	defer sctx.Close()
+	ctx := tikvutil.WithInternalSourceType(context.Background(), tidbkv.InternalImportInto)
+
+	convertOptions := func(inOptions []*ast.LoadDataOpt) []*plannercore.LoadDataOpt {
+		options := []*plannercore.LoadDataOpt{}
+		var err error
+		for _, opt := range inOptions {
+			loadDataOpt := plannercore.LoadDataOpt{Name: opt.Name}
+			if opt.Value != nil {
+				loadDataOpt.Value, err = plannerutil.RewriteAstExprWithPlanCtx(sctx, opt.Value, nil, nil, false)
+				require.NoError(t, err)
+			}
+			options = append(options, &loadDataOpt)
+		}
+		return options
+	}
+
+	p := parser.New()
+	sql := "import into t from '/file.csv' with full, base_uri='s3://bucket/base', merge_strategy='last_write_wins', cloud_storage_uri='s3://bucket/data'"
+	stmt, err := p.ParseOneStmt(sql, "", "")
+	require.NoError(t, err, sql)
+	plan := &Plan{Format: DataFormatCSV}
+	err = plan.initOptions(ctx, sctx, convertOptions(stmt.(*ast.ImportIntoStmt).Options))
+	require.NoError(t, err, sql)
+	require.Equal(t, UpsertModeFull, plan.UpsertMode)
+	require.Equal(t, "s3://bucket/base", plan.BaseURI)
+	require.Equal(t, MergeStrategyLastWriteWins, plan.MergeStrategy)
+
+	sql = "import into t from '/file.csv' with delta, base_version='base-1', cloud_storage_uri='s3://bucket/data'"
+	stmt, err = p.ParseOneStmt(sql, "", "")
+	require.NoError(t, err, sql)
+	plan = &Plan{Format: DataFormatCSV}
+	err = plan.initOptions(ctx, sctx, convertOptions(stmt.(*ast.ImportIntoStmt).Options))
+	require.NoError(t, err, sql)
+	require.Equal(t, UpsertModeDelta, plan.UpsertMode)
+	require.Equal(t, "base-1", plan.BaseVersion)
+	require.Equal(t, "s3://bucket/data", plan.BaseURI)
+
+	sql = "import into t from '/file.csv' with delta, cloud_storage_uri='s3://bucket/data'"
+	stmt, err = p.ParseOneStmt(sql, "", "")
+	require.NoError(t, err, sql)
+	plan = &Plan{Format: DataFormatCSV}
+	err = plan.initOptions(ctx, sctx, convertOptions(stmt.(*ast.ImportIntoStmt).Options))
+	require.Error(t, err)
+
+	sql = "import into t from '/file.csv' with base_version='base-1', cloud_storage_uri='s3://bucket/data'"
+	stmt, err = p.ParseOneStmt(sql, "", "")
+	require.NoError(t, err, sql)
+	plan = &Plan{Format: DataFormatCSV}
+	err = plan.initOptions(ctx, sctx, convertOptions(stmt.(*ast.ImportIntoStmt).Options))
+	require.Error(t, err)
+	require.ErrorIs(t, err, exeerrors.ErrLoadDataUnsupportedOption)
+}
+
 func TestAdjustOptions(t *testing.T) {
 	plan := &Plan{
 		DiskQuota:      1,
