@@ -3631,6 +3631,7 @@ func (b *PlanBuilder) buildShow(ctx context.Context, show *ast.ShowStmt) (base.P
 			ImportJobID:           show.ImportJobID,
 			DistributionJobID:     show.DistributionJobID,
 			ImportGroupKey:        show.ShowGroupKey,
+			ImportBaseID:          show.ImportBaseID,
 		},
 	}.Init(b.ctx)
 	isView := false
@@ -4677,6 +4678,57 @@ var (
 	showImportGroupsFTypes = []byte{mysql.TypeString, mysql.TypeLonglong,
 		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
 		mysql.TypeTimestamp, mysql.TypeTimestamp}
+
+	showImportBasesNames = []string{
+		"Base_ID", "Job_ID", "Table_Schema", "Table_Name", "Table_ID",
+		"Base_URI", "Base_Manifest_Path", "Create_Time", "Created_By",
+		"Row_Count", "Data_Bytes", "Index_Bytes",
+	}
+	showImportBasesFTypes = []byte{
+		mysql.TypeVarchar, mysql.TypeLonglong, mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeLonglong,
+		mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeTimestamp, mysql.TypeVarchar,
+		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
+	}
+
+	showImportRegionsNames = []string{
+		"Start_Key", "End_Key", "Data_Files", "Stat_Files", "Index_Files", "Checksum", "KV_Bytes",
+	}
+	showImportRegionsFTypes = []byte{
+		mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeJSON, mysql.TypeJSON, mysql.TypeJSON, mysql.TypeVarchar, mysql.TypeLonglong,
+	}
+
+	showImportChangedRegionsNames = []string{
+		"Job_ID", "Base_ID", "Start_Key", "End_Key", "Changed_Rows", "KV_Bytes",
+	}
+	showImportChangedRegionsFTypes = []byte{
+		mysql.TypeLonglong, mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeLonglong, mysql.TypeLonglong,
+	}
+
+	showImportMeteringNames = []string{
+		"Job_ID", "Task_ID", "Metering_Time",
+		"Get_Requests", "Put_Requests", "ObjStore_Read_Bytes", "ObjStore_Write_Bytes",
+		"Cluster_Read_Bytes", "Cluster_Write_Bytes",
+		"Row_Count", "Data_KV_Bytes", "Index_KV_Bytes",
+		"Required_Slots", "Max_Node_Count", "Duration_Seconds",
+	}
+	showImportMeteringFTypes = []byte{
+		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeTimestamp,
+		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
+		mysql.TypeLonglong, mysql.TypeLonglong,
+		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
+		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
+	}
+
+	showImportCostNames = []string{
+		"Job_ID", "Metering_Time",
+		"Get_Request_Cost", "Put_Request_Cost", "ObjStore_Read_Cost", "ObjStore_Write_Cost",
+		"Cluster_Write_Cost", "Total_Cost",
+	}
+	showImportCostFTypes = []byte{
+		mysql.TypeLonglong, mysql.TypeTimestamp,
+		mysql.TypeDouble, mysql.TypeDouble, mysql.TypeDouble, mysql.TypeDouble,
+		mysql.TypeDouble, mysql.TypeDouble,
+	}
 
 	// ImportIntoDataSource used inplannererrors.ErrLoadDataInvalidURI.
 	ImportIntoDataSource = "data source"
@@ -6159,6 +6211,21 @@ func buildShowSchema(s *ast.ShowStmt, isView bool, isSequence bool) (schema *exp
 	case ast.ShowImportGroups:
 		names = showImportGroupsNames
 		ftypes = showImportGroupsFTypes
+	case ast.ShowImportBases:
+		names = showImportBasesNames
+		ftypes = showImportBasesFTypes
+	case ast.ShowImportRegions:
+		names = showImportRegionsNames
+		ftypes = showImportRegionsFTypes
+	case ast.ShowImportChangedRegions:
+		names = showImportChangedRegionsNames
+		ftypes = showImportChangedRegionsFTypes
+	case ast.ShowImportMetering:
+		names = showImportMeteringNames
+		ftypes = showImportMeteringFTypes
+	case ast.ShowImportCost:
+		names = showImportCostNames
+		ftypes = showImportCostFTypes
 	case ast.ShowDistributionJobs:
 		names = distributionJobsSchemaNames
 		ftypes = distributionJobsSchedulerFTypes

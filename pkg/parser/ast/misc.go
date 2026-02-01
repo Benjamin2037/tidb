@@ -2525,6 +2525,7 @@ const (
 	AdminShowDDL AdminStmtType = iota + 1
 	AdminCheckTable
 	AdminShowDDLJobs
+	AdminIngestChangedRegions
 	AdminCancelDDLJobs
 	AdminPauseDDLJobs
 	AdminResumeDDLJobs
@@ -2718,6 +2719,11 @@ func (n *AdminStmt) Restore(ctx *format.RestoreCtx) error {
 			if err := n.Where.Restore(ctx); err != nil {
 				return errors.Annotate(err, "An error occurred while restore ShowStmt.Where")
 			}
+		}
+	case AdminIngestChangedRegions:
+		ctx.WriteKeyWord("INGEST CHANGED REGIONS JOB ")
+		if len(n.JobIDs) > 0 {
+			ctx.WritePlainf("%d", n.JobIDs[0])
 		}
 	case AdminShowNextRowID:
 		ctx.WriteKeyWord("SHOW ")

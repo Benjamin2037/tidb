@@ -532,6 +532,26 @@ func TestImportActions(t *testing.T) {
 			expectSQL: "SHOW IMPORT JOBS WHERE `aa`>1",
 		},
 		{
+			sourceSQL: "show import bases",
+			expectSQL: "SHOW IMPORT BASES",
+		},
+		{
+			sourceSQL: "show import regions base 'base-1'",
+			expectSQL: "SHOW IMPORT REGIONS BASE 'base-1'",
+		},
+		{
+			sourceSQL: "show import changed regions job 123",
+			expectSQL: "SHOW IMPORT CHANGED REGIONS JOB 123",
+		},
+		{
+			sourceSQL: "show import cost job 123",
+			expectSQL: "SHOW IMPORT COST JOB 123",
+		},
+		{
+			sourceSQL: "show import metering job 123",
+			expectSQL: "SHOW IMPORT METERING JOB 123",
+		},
+		{
 			sourceSQL: "show import groups",
 			expectSQL: "SHOW IMPORT GROUPS",
 		},

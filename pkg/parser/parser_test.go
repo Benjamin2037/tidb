@@ -503,6 +503,7 @@ func TestAdminStmt(t *testing.T) {
 		{"admin check index tableName idxName;", true, "ADMIN CHECK INDEX `tableName` idxName"},
 		{"admin check index tableName idxName (1, 2), (4, 5);", true, "ADMIN CHECK INDEX `tableName` idxName (1,2), (4,5)"},
 		{"admin checksum table t1, t2;", true, "ADMIN CHECKSUM TABLE `t1`, `t2`"},
+		{"admin ingest changed regions job 123", true, "ADMIN INGEST CHANGED REGIONS JOB 123"},
 		{"admin cancel ddl jobs 1", true, "ADMIN CANCEL DDL JOBS 1"},
 		{"admin cancel ddl jobs 1, 2", true, "ADMIN CANCEL DDL JOBS 1, 2"},
 		{"admin pause ddl jobs 1, 3", true, "ADMIN PAUSE DDL JOBS 1, 3"},
