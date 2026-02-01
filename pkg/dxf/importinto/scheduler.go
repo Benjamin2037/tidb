@@ -603,6 +603,16 @@ func updateTaskSummary(
 			taskMeta.Summary.ImportedRows -= int64(conflictedRowCnt)
 			taskMeta.Summary.ConflictRowCnt = conflictedRowCnt
 		}
+		if taskMeta.Plan.IsUpsertFull() {
+			baseID := defaultBaseID(taskMeta.JobID)
+			baseURI := taskMeta.Plan.BaseURI
+			if baseURI == "" {
+				baseURI = taskMeta.Plan.CloudStorageURI
+			}
+			taskMeta.Summary.BaseID = baseID
+			taskMeta.Summary.BaseURI = baseURI
+			taskMeta.Summary.BaseManifestPath = BaseManifestPath(baseID)
+		}
 	}
 
 	return updateMeta(task, taskMeta)
