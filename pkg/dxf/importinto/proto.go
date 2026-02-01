@@ -110,6 +110,7 @@ type WriteIngestStepMeta struct {
 	RangeJobKeys            [][]byte `json:"range-job-keys" external:"true"`
 	RangeSplitKeys          [][]byte `json:"range-split-keys" external:"true"`
 	TS                      uint64   `json:"ts"`
+	StoreURI                string   `json:"store_uri,omitempty"`
 }
 
 // Marshal marshals the write ingest step meta to JSON.
@@ -176,6 +177,42 @@ type ConflictResolutionStepMeta struct {
 
 // Marshal marshals the conflict resolution step meta to JSON.
 func (m *ConflictResolutionStepMeta) Marshal() ([]byte, error) {
+	return m.BaseExternalMeta.Marshal(m)
+}
+
+// PlanTouchedRegionsStepMeta is the meta of plan touched regions step.
+type PlanTouchedRegionsStepMeta struct {
+	external.BaseExternalMeta
+	BaseID             string   `json:"base_id"`
+	BaseURI            string   `json:"base_uri"`
+	BaseManifestPath   string   `json:"base_manifest_path"`
+	DeltaStoreURI      string   `json:"delta_store_uri"`
+	DeltaDataFiles     []string `json:"delta_data_files" external:"true"`
+	DeltaStartKey      string   `json:"delta_start_key,omitempty"`
+	DeltaEndKey        string   `json:"delta_end_key,omitempty"`
+	ChangedRegionsPath string   `json:"changed_regions_path"`
+}
+
+// Marshal marshals the plan touched regions meta to JSON.
+func (m *PlanTouchedRegionsStepMeta) Marshal() ([]byte, error) {
+	return m.BaseExternalMeta.Marshal(m)
+}
+
+// RegionMergeStepMeta is the meta of region merge step.
+type RegionMergeStepMeta struct {
+	external.BaseExternalMeta
+	BaseID             string   `json:"base_id"`
+	BaseURI            string   `json:"base_uri"`
+	BaseManifestPath   string   `json:"base_manifest_path"`
+	DeltaStoreURI      string   `json:"delta_store_uri"`
+	DeltaDataFiles     []string `json:"delta_data_files" external:"true"`
+	ChangedRegionsPath string   `json:"changed_regions_path"`
+	OutputBaseID       string   `json:"output_base_id"`
+	OutputManifestPath string   `json:"output_manifest_path"`
+}
+
+// Marshal marshals the region merge meta to JSON.
+func (m *RegionMergeStepMeta) Marshal() ([]byte, error) {
 	return m.BaseExternalMeta.Marshal(m)
 }
 

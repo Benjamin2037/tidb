@@ -96,6 +96,14 @@ func exampleStep2Str(s Step) string {
 //     -> ImportStepConflictResolution (optional)
 //     -> ImportStepPostProcess
 //     -> StepDone
+//   - delta upsert:
+//     StepInit
+//     -> ImportStepDeltaEncodeAndSort
+//     -> ImportStepPlanTouchedRegions
+//     -> ImportStepRegionMergeAndRebuild
+//     -> ImportStepIngestChangedRegions
+//     -> ImportStepPostProcess
+//     -> StepDone
 const (
 	// ImportStepImport we sort source data and ingest it into TiKV in this step.
 	ImportStepImport Step = 1
@@ -124,6 +132,14 @@ const (
 	// in external storage, if any conflicts are detected, we will resolve them
 	// here. so there might be 0 subtasks in this step.
 	ImportStepConflictResolution Step = 7
+	// ImportStepDeltaEncodeAndSort encodes delta data and writes sorted kv into global storage.
+	ImportStepDeltaEncodeAndSort Step = 8
+	// ImportStepPlanTouchedRegions computes changed regions from delta output.
+	ImportStepPlanTouchedRegions Step = 9
+	// ImportStepRegionMergeAndRebuild merges base+delta for changed regions and rebuilds kv.
+	ImportStepRegionMergeAndRebuild Step = 10
+	// ImportStepIngestChangedRegions ingests rebuilt kv for changed regions into TiKV.
+	ImportStepIngestChangedRegions Step = 11
 )
 
 func importIntoStep2Str(s Step) string {
@@ -142,6 +158,14 @@ func importIntoStep2Str(s Step) string {
 		return "collect-conflicts"
 	case ImportStepConflictResolution:
 		return "conflict-resolution"
+	case ImportStepDeltaEncodeAndSort:
+		return "delta-encode"
+	case ImportStepPlanTouchedRegions:
+		return "plan-touched-regions"
+	case ImportStepRegionMergeAndRebuild:
+		return "region-merge"
+	case ImportStepIngestChangedRegions:
+		return "ingest-changed-regions"
 	default:
 		return unknownStepStr(s)
 	}

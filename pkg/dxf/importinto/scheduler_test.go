@@ -155,6 +155,20 @@ func (s *importIntoSuite) TestGetNextStep() {
 		s.Equal(nextStep, ext.GetNextStep(task))
 		task.Step = nextStep
 	}
+
+	task.Step = proto.StepInit
+	ext = &importScheduler{UpsertMode: importer.UpsertModeDelta}
+	for _, nextStep := range []proto.Step{
+		proto.ImportStepDeltaEncodeAndSort,
+		proto.ImportStepPlanTouchedRegions,
+		proto.ImportStepRegionMergeAndRebuild,
+		proto.ImportStepIngestChangedRegions,
+		proto.ImportStepPostProcess,
+		proto.StepDone,
+	} {
+		s.Equal(nextStep, ext.GetNextStep(task))
+		task.Step = nextStep
+	}
 }
 
 func (s *importIntoSuite) TestGetStepOfEncode() {
@@ -175,4 +189,5 @@ func TestIsImporting2TiKV(t *testing.T) {
 	require.False(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepPostProcess}}))
 	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepImport}}))
 	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepWriteAndIngest}}))
+	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepIngestChangedRegions}}))
 }

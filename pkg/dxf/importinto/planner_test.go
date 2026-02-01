@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/tidb/pkg/objstore"
 	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tidb/pkg/planner/core"
+	"github.com/pingcap/tidb/pkg/store/mockstore"
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -252,6 +253,77 @@ func TestGenerateMergeSortSpecs(t *testing.T) {
 	require.Equal(t, "1", index1.KVGroup)
 	require.Len(t, index1.DataFiles, 1)
 	require.Equal(t, "i1_2_/1", index1.DataFiles[0])
+}
+
+func TestGenerateIngestChangedRegionsSpecs(t *testing.T) {
+	ctx := context.Background()
+	kvstore, err := mockstore.NewMockStore()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, kvstore.Close())
+	})
+
+	baseURI := "memstore:///"
+	store, err := importer.GetSortStore(ctx, baseURI)
+	require.NoError(t, err)
+	defer store.Close()
+
+	jobID := int64(7)
+	baseID := defaultBaseID(jobID)
+	baseManifest := &BaseManifest{
+		TableID: 1,
+		BaseID:  baseID,
+		BaseURI: baseURI,
+		Regions: []BaseRegionMeta{
+			{
+				StartKey:       "00",
+				EndKey:         "10",
+				DataFiles:      []string{"base/data/1"},
+				StatFiles:      []string{"base/data/1.stat"},
+				IndexFiles:     []string{"base/index/1/1"},
+				IndexStatFiles: []string{"base/index/1/1.stat"},
+				KVBytes:        123,
+			},
+		},
+	}
+	require.NoError(t, WriteBaseManifest(ctx, store, BaseManifestPath(baseID), baseManifest))
+
+	changed := &ChangedRegionsManifest{
+		BaseID: baseID,
+		JobID:  jobID,
+		Regions: []ChangedRegionMeta{
+			{StartKey: "00", EndKey: "10"},
+		},
+	}
+	require.NoError(t, WriteChangedRegionsManifest(ctx, store, ChangedRegionsPath(jobID), changed))
+
+	plan := importer.Plan{
+		CloudStorageURI: baseURI,
+		BaseURI:         baseURI,
+	}
+	logical := &LogicalPlan{
+		JobID: jobID,
+		Plan:  plan,
+	}
+	planCtx := planner.PlanCtx{
+		Ctx:   ctx,
+		Store: kvstore,
+	}
+	specs, err := generateIngestChangedRegionsSpecs(planCtx, logical)
+	require.NoError(t, err)
+	require.Len(t, specs, 2)
+
+	groups := make(map[string]*WriteIngestSpec)
+	for _, spec := range specs {
+		wi := spec.(*WriteIngestSpec)
+		groups[wi.KVGroup] = wi
+	}
+	require.Contains(t, groups, external.DataKVGroup)
+	require.Contains(t, groups, "1")
+	require.Equal(t, baseURI, groups[external.DataKVGroup].StoreURI)
+	require.Equal(t, baseURI, groups["1"].StoreURI)
+	require.Equal(t, baseManifest.Regions[0].DataFiles, groups[external.DataKVGroup].DataFiles)
+	require.Equal(t, baseManifest.Regions[0].IndexFiles, groups["1"].DataFiles)
 }
 
 func genMergeStepMetas(t *testing.T, cnt int) [][]byte {
