@@ -1,4 +1,4 @@
-# IMPORT INTO 全量/增量 Upsert（基于 DXF + S3）
+# IMPORT INTO Full and Delta Upsert (DXF + S3)
 
 - Author(s): Codex
 - Discussion PR: TBD
@@ -20,59 +20,67 @@
 
 ## Introduction
 
-本文档描述在 TiDB 的 IMPORT INTO + DXF + Lightning global sort/ingest 基础上，新增“全量基线 + 增量 upsert”的导入能力。方案支持从对象存储导入 TSV/CSV，在 S3 上维护 base 版本元数据，按 region 进行 base+delta 合并，并在 delta 导入时自动仅 ingest 变更 region。同时提供 `SHOW IMPORT METERING` 与 `SHOW IMPORT COST` 以便审计导入资源消耗与成本。
+This document proposes incremental upsert on top of TiDB IMPORT INTO + DXF + Lightning global sort and ingest. The solution imports TSV or CSV from object storage, maintains a base version manifest on S3, merges base and delta by region, and automatically ingests only changed regions for delta imports. It also provides SHOW IMPORT METERING and SHOW IMPORT COST for auditing resource usage and cost.
 
 ## Motivation or Background
 
-业务场景为宽表（含 JSON 列），主键为（用户 ID + 设备 ID），每天来自多个系统的增量数据仅更新部分列。需求要求：
+The primary workload is a wide table (including JSON columns) with a composite primary key (user ID + device ID). Daily delta data from multiple systems updates only a subset of columns. Requirements:
 
-- 仅需要最终一致性，允许批量导入。
-- 增量导入必须基于前一日基线数据做 upsert（部分列更新）。
-- 成本敏感，导入链路需要可观测与可估算。
-- 不希望人工操作或额外命令，增量导入应自动仅 ingest 变更范围。
+- Eventual consistency is acceptable, batch import is allowed.
+- Delta import must upsert against the previous day base (sparse column updates).
+- Cost sensitive; the import pipeline must be observable and estimable.
+- No manual operations or extra commands; delta import should automatically ingest only changed ranges.
 
-现有 IMPORT INTO 的冲突处理以“删除冲突 KV”为主，无法完成“稀疏列更新”的 upsert，因此需要新的增量流程与元数据体系。
+Current IMPORT INTO resolves conflicts by deleting conflicting KV, which cannot implement sparse column updates. A new delta pipeline and metadata system are required.
 
 ## Detailed Design
 
-### 用户语法与选项
+### User Syntax and Options
 
-复用 IMPORT INTO 的 WITH 选项解析，新增如下选项：
+Reuse IMPORT INTO WITH option parsing and add:
 
-- `WITH full`：一次导入后保留 sorted KV 为 base，生成 Base Manifest。
-- `WITH delta`：基于 base 做增量 upsert，生成新 base，并自动 ingest 变更 region；若缺少 base_version 则自动从**目标表当前 TiKV 元数据**解析 base（region 范围 + SST 元信息），并通过 remote cop 扫描重叠范围；解析失败则报错，不依赖 backupCluster。base_version 非强制：可显式指定 base_version/base_uri；未指定则自动解析；需要固定基线时可在首次 delta 后执行一次 full 生成新 base。
-- `base_version='v...'`：指定基线版本（可选）。
-- `base_uri='s3://...'`：指定基线路径（可选）。
-- `merge_strategy='last_write_wins'|'max_ts'`：delta 内同主键多条记录的归并策略。
-- `base_merge_mode='reference'|'copy'`：delta 合并时对未变更 region 的处理方式（reference 复用旧文件；copy 复制到新 base）。
-- `merge_executor='tidb'|'tikv-worker'`：region 合并执行位置（默认 tidb；选择 tikv-worker 走远端合并）。
+- WITH full: keep sorted KV as base and generate base manifest.
+- WITH delta: upsert against base, generate a new base, and auto-ingest changed regions. If base_version is missing, derive the base from current TiKV metadata (region ranges and SST metadata) and scan overlaps via remote cop; fail fast if it cannot be resolved (no backup cluster dependency). base_version is optional: it can be explicit via base_version/base_uri or auto-derived; run full once after a delta to pin a new base.
+- base_version='v...': optional baseline version.
+- base_uri='s3://...': optional baseline path.
+- merge_strategy='last_write_wins'|'max_ts': resolve duplicate primary keys within a delta batch.
+- base_merge_mode='reference': reuse files for unchanged regions during delta merge.
+- merge_executor='tidb'|'tikv-worker': location of region merge execution (default tidb; tikv-worker is remote merge).
 
-约束：
+System variables:
+- Remove apply_mode/apply_window/apply_rate_limit. Apply is immediate by default and controlled only by SLO guard.
+- SLO guard config: mysql.tidb_import_slo_guard (JSON config) + ALTER/SHOW IMPORT SLO GUARD (per job_id or global job_id=0).
 
-- full/delta 只能走 global sort（`CloudStorageURI` 必须存在）。
-- 若缺少 base_version，则 `WITH delta` 自动解析目标表 TiKV 元数据生成 base 视图；解析失败则直接报错。
-- `merge_executor=tikv-worker` 需要 base manifest 已存在，不支持无 base manifest 回退路径。
+SLO guard statements:
+- ALTER IMPORT SLO GUARD [JOB <id>] WITH config='{"enable":true,"pause_threshold":"10ms","slow_apply_rate_limit_mb_per_sec":64}'
+- SHOW IMPORT SLO GUARD [JOB <id>]
 
-### 流水线设计
+Constraints:
 
-#### Full 模式
+- full and delta require global sort (CloudStorageURI must be set).
+- If base_version is missing, WITH delta derives base from TiKV metadata; fail if unresolved.
+- merge_executor=tikv-worker requires a base manifest; no fallback without a base manifest.
 
-沿用现有 global sort 流程，新增 PostProcess 生成 base manifest。
+### Pipeline Design
+
+#### Full mode
+
+Reuse the existing global sort pipeline and add base manifest generation in PostProcess.
 
 ```
 StepInit
   -> EncodeAndSort
   -> MergeSort
   -> WriteAndIngest
-  -> CollectConflicts (可选)
-  -> ConflictResolution (可选)
-  -> PostProcess (生成 base manifest)
+  -> CollectConflicts (optional)
+  -> ConflictResolution (optional)
+  -> PostProcess (write base manifest)
   -> StepDone
 ```
 
-#### Delta 模式
+#### Delta mode
 
-新增增量 pipeline，RegionMerge 后直接 ingest 变更 region，无需人工命令：
+Introduce a delta pipeline. After RegionMerge, ingest changed regions immediately by default; if SLO guard triggers slow or pause, Apply is throttled or paused and then resumed:
 
 ```
 StepInit
@@ -84,65 +92,80 @@ StepInit
   -> StepDone
 ```
 
-### 预热加载路径（调用链路）
+If SLO guard is disabled, Apply runs immediately without time windows or manual delay.
 
-- 入口：`executor/import_into.go` -> `importinto/SubmitTask` -> `importScheduler.GetNextStep`
-- PlanTouchedRegions：`plan_touched_regions.go` 读取 base manifest（`ReadBaseManifest`）或 TiKV 元数据（`resolveTableRecordRanges`），并加载 delta KV meta（`getSortedKVMetasOfEncodeStep`）
-- RegionMerge：`NewRegionMergeStepExecutor.Init` 初始化 `TableImporter` 与编码器；随后按 region 建立迭代器  
-  - S3 路径：`external.NewMergeKVIter` 预取对象存储元信息并读取首批 KV  
-  - remote cop 路径：`remote_base_iter.go` 通过 `buildBaseScanDAG` + `distsql.Select` 触发 RegionCache 预热
-- IngestChangedRegions：`generateIngestChangedRegionsSpecs` 预解析 base manifest 与 changed regions，提取范围与文件列表
+### SLO Guard (dynamic slow or pause by p99)
 
-### Delta 行编码（稀疏更新）
+- Background SLO guard worker queries metrics_schema.tidb_query_duration with sql_type=Select p99 (5m window, 30s interval).
+- State machine:
+  - p99 >= slow (0.8 * pause_threshold) -> slow state (Apply rate limit override)
+  - p99 >= pause_threshold -> PauseTask to pause import and preheat
+  - p99 <= resume (0.6 * pause_threshold) -> ResumeTask
+- Config via ALTER IMPORT SLO GUARD [JOB <id>] WITH config='{"enable":true,"pause_threshold":"10ms","slow_apply_rate_limit_mb_per_sec":64}'.
+- Precedence: job-level config first, fallback to global job_id=0.
+- If JOB <id> omitted, global config (job_id=0). enable=false disables global guard.
 
-增量数据可能只包含部分列。为保证“缺失列不覆盖”，对 data KV value 追加列位图：
+### Preheat Call Path
 
-- 写入：在 data KV value 前增加 `varint(bitmap_len)` + `bitmap bytes`。
-- 读取合并：只对 bitmap 标记的列应用 delta 值，未出现列保持 base 值。
+- Entry: executor/import_into.go -> importinto/SubmitTask -> importScheduler.GetNextStep
+- PlanTouchedRegions: plan_touched_regions.go reads base manifest (ReadBaseManifest) or TiKV metadata (resolveTableRecordRanges) and loads delta KV meta (getSortedKVMetasOfEncodeStep)
+- RegionMerge: NewRegionMergeStepExecutor.Init initializes TableImporter and encoder, then builds per-region iterators
+  - S3 path: external.NewMergeKVIter prefetches object metadata and first KV batch
+  - remote cop path: remote_base_iter.go builds DAG via buildBaseScanDAG and triggers distsql.Select to warm RegionCache
+- IngestChangedRegions: generateIngestChangedRegionsSpecs pre-parses base manifest and changed regions to extract ranges and file lists
+- Apply runs immediately by default and is controlled only by SLO guard
 
-该编码只影响 delta 模式，不影响原有 full/默认导入。
+### Delta Row Encoding (sparse update)
 
-### 多源数据冲突合并
+Delta data may include only a subset of columns. To avoid overwriting missing columns, add a column bitmap to the data KV value:
 
-当同一批次来自多源系统的数据出现相同主键，合并顺序需确定且可追踪：
+- Write: prepend varint(bitmap_len) + bitmap bytes to data KV value.
+- Merge read: apply delta only to columns marked in the bitmap; keep base values for others.
 
-- 排序键：`(primary_key, merge_ts, source_priority, file_order, row_offset)`  
-- merge_ts 由业务版本列/时间列提供；缺失或相等时使用 file_order + row_offset 作为稳定 tie-breaker  
-- 同主键多源记录归并为一条，保证跨重试/重放的确定性
+This encoding affects delta mode only and does not change full or default imports.
 
-### RegionMerge 合并算法
+### Multi-source Conflict Merge
 
-对每个变更 region，读取 base + delta 的 data KV 进行行级合并，并重建 data/index KV。base manifest 存在时使用 `external.NewMergeKVIter` 顺序合并 S3 上的 sorted KV；缺失时从目标表 TiKV 元数据构造运行时 base 视图（region 范围 + SST 元信息），通过 remote cop 扫描重叠范围并合并（RPC/解码开销更高，仅作为回退路径）：
+If multiple sources produce the same primary key within a batch, the merge order must be deterministic and traceable:
 
-- 未变更 region：由 `base_merge_mode` 决定复用旧文件（reference）或复制到新 base（copy）。
-- `merge_executor`：
-  - `tidb`：当前默认路径；支持 base manifest 与无 base manifest 回退。
-  - `tikv-worker`：通过 `/merge` 在 tikv-worker 内合并并产出外部 KV；要求 base manifest。
-- tikv-worker 限制：不支持 generated 列、prefix index、multi‑valued/vector index、common_handle_version>1；索引列需为二进制/数值类（无 restored data）。
+- Sort key: (primary_key, merge_ts, source_priority, file_order, row_offset)
+- merge_ts from business version or time column; if missing or equal, use file_order + row_offset as a stable tie-breaker
+- Merge multiple rows into one deterministic row across retries and replays
 
-1. 根据主键排序并合并。
-2. 若 base 行存在，delta 行仅覆盖出现列。
-3. 若 base 行不存在，按列默认值/生成列补齐后插入。
-4. delta 内同主键多条记录按 `merge_strategy` 归并为一条。
-5. 输出新 base 的 data/index KV，同时生成 index 统计文件。
+### RegionMerge Algorithm
 
-### Changed Regions 规划与自动 ingest
+For each changed region, read base and delta data KV, merge rows, and rebuild data and index KV. With a base manifest, use external.NewMergeKVIter to merge sorted KV on S3. Without a base manifest, build a runtime base view from TiKV metadata (region ranges + SST metadata), scan overlaps via remote cop, and merge (higher RPC and decode cost, fallback only).
 
-PlanTouchedRegions 基于 delta KV key ranges 与 base manifest 的 region 边界求交，输出 `changed_regions.json`。若缺少 base manifest，则从目标表 TiKV 元数据获取 region 范围，按 overlap 生成变更范围（不退化为全量范围）。
+- Unchanged regions: base_merge_mode controls reuse (reference).
+- merge_executor:
+  - tidb: default, supports base manifest and fallback.
+  - tikv-worker: remote merge via /merge endpoint; requires base manifest.
+- tikv-worker limits: no generated columns, no prefix index, no multi-valued or vector index, no common_handle_version > 1; index columns must be binary or numeric (no restored data).
 
-IngestChangedRegions 读取 `changed_regions.json` 与新 base manifest，按 region 范围仅 ingest 变更 region 的 data/index KV。该步骤自动执行，不引入 `ADMIN INGEST` 等人工命令。
+Steps:
+1. Merge by primary key order.
+2. If base row exists, overwrite only columns present in delta.
+3. If base row is missing, insert with defaults and generated columns.
+4. Resolve multiple delta rows by merge_strategy.
+5. Output new base data and index KV and index stats files.
 
-### Manifest 与元数据
+### Changed Regions Planning and Auto Ingest
 
-所有明细元数据落在对象存储，数据库仅保存指针字段（作业 summary/parameters）：
+PlanTouchedRegions intersects delta KV key ranges with base region boundaries and outputs changed_regions.json. If base manifest is missing, derive region ranges from TiKV metadata and build changed ranges by overlap (no full-range fallback).
 
-当未提供 base_version 且 base manifest 不存在时，使用**目标表当前 TiKV 元数据**构建运行时 base 视图：
+IngestChangedRegions reads changed_regions.json and the new base manifest, then ingests only changed region data and index KV. This step is automatic and does not require manual ADMIN INGEST commands.
 
-- 读取目标表对应的 Region 范围与 SST 元信息的 key bounds（smallest/biggest）。
-- 仅保留与 delta key-range overlap 的范围，交由 remote cop 构建 snapshot 并扫描。
-- 组装为运行时 base 视图（可选落盘到外部存储），供后续 merge 使用。
+### Manifest and Metadata
 
-Base Manifest：
+All detailed metadata lives in object storage; the database stores only pointers (job summary and parameters).
+
+If base_version is missing and no base manifest exists, build a runtime base view from current TiKV metadata:
+
+- Read region ranges and SST key bounds (smallest and biggest) for the target table.
+- Keep only ranges overlapping delta key ranges, then build a snapshot via remote cop and scan.
+- Assemble a runtime base view (optionally persisted) for subsequent merge.
+
+Base Manifest example:
 
 ```json
 {
@@ -166,7 +189,7 @@ Base Manifest：
 }
 ```
 
-Changed Regions Manifest：
+Changed Regions Manifest example:
 
 ```json
 {
@@ -183,132 +206,134 @@ Changed Regions Manifest：
 }
 ```
 
-### SHOW 查询接口
+### SHOW Query Interfaces
 
-- `SHOW IMPORT BASES`：列出 base 版本与汇总信息。
-- `SHOW IMPORT REGIONS BASE <id>`：读取 base manifest 输出 region 明细。
-- `SHOW IMPORT CHANGED REGIONS JOB <job_id>`：读取 changed regions manifest。
-- `SHOW IMPORT METERING JOB <job_id>`：输出导入任务的原始计量数据（按时间桶）。
-- `SHOW IMPORT COST JOB <job_id>`：基于计量数据计算成本并汇总。
+- SHOW IMPORT BASES: list base versions and summary.
+- SHOW IMPORT REGIONS BASE <id>: read base manifest and output region details.
+- SHOW IMPORT CHANGED REGIONS JOB <job_id>: read changed regions manifest.
+- SHOW IMPORT METERING JOB <job_id>: output raw metering data by time bucket.
+- SHOW IMPORT COST JOB <job_id>: compute and summarize cost from metering.
 
-### 计量与成本模型
+### Metering and Cost Model
 
-计量数据来自 DXF metering 文件（对象存储）。按任务 ID 过滤并输出：
+Metering data comes from DXF metering files in object storage. Filter by job ID and output:
 
-- objstore 请求数：GET/PUT
-- objstore 读写字节数
-- cluster 读写字节数
-- row_count、data/index KV bytes、required slots、duration 等
+- object store requests: GET and PUT
+- object store bytes read and written
+- cluster bytes read and written
+- row_count, data and index KV bytes, required slots, duration, etc
 
-成本计算采用默认价格参数：
+Default price parameters:
 
-- GET：$0.0004 / 1000
-- PUT：$0.005 / 1000
-- 基于字节数的 objstore/cluster 成本默认 0（预留扩展）
-- S3 Standard 存储分层价（US East, N. Virginia；2026-01-30）：0-50TB $0.023/GB-月、50-500TB $0.022/GB-月、>500TB $0.021/GB-月（实际以 Price List API 刷新）
-- 同区域 S3 到计算节点内网传输不计费；跨区域/公网出流另计
+- GET: $0.0004 / 1000
+- PUT: $0.005 / 1000
+- object store or cluster byte cost defaults to 0 (reserved for extension)
+- S3 Standard storage tiers (US East, N. Virginia; 2026-01-30): 0-50TB $0.023 per GB-month, 50-500TB $0.022 per GB-month, >500TB $0.021 per GB-month (refresh via Price List API)
+- In-region S3 to compute is free; cross-region or public egress is extra
 
-计量聚合粒度为 metering flush interval（当前实现按分钟）。
+Metering aggregation granularity follows the metering flush interval (currently per minute).
 
-### 175TB 存储成本示例（S3 Standard, US East）
-- 单份 base（175 TB ≈ 175,000 GB）：约 $3,900/月（按分层价）
-- 若保留 1 份 base + 当日 delta（175 TB）：约 $7,750/月
-- 若保留 10 天 delta（1,750 TB），总量 1,925 TB：约 $40,975/月
+### 175 TB Storage Cost Example (S3 Standard, US East)
 
-### 节点规格与吞吐 sizing（8c16G/16c32G）
-按 AWS 官方网络带宽上限估算（40%~60% 有效吞吐）：
-- **c6i.4xlarge（16c32G）**：12.5Gbps → 2.2–3.4 TB/h/节点
-- **c6in.4xlarge（16c32G，网络优化）**：50Gbps → 9–13.5 TB/h/节点
-目标吞吐下的节点数区间：
-| 目标 | 需要吞吐 | c6i.4xlarge | c6in.4xlarge |
-| --- | ---: | ---: | ---: |
-| 35TB / 2h | 17.5 TB/h | 6–8 台 | 2–3 台 |
-| 175TB / 2h | 87.5 TB/h | 26–40 台 | 7–10 台 |
-| upsert(r=70%) | 201 TB/h | 60–90 台 | 15–23 台 |
+- Single base (175 TB ~= 175,000 GB): about $3,900 per month (tiered pricing)
+- Base + daily delta (175 TB): about $7,750 per month
+- 10-day delta retention (1,750 TB), total 1,925 TB: about $40,975 per month
 
-推荐角色划分：
-- **控制面（TiDB 8c16G）**：固定 3 台（HA）
-- **计算面（TiDB 16c32G）**：约为 remote-cop 节点数 1–2 倍
-- **remote-cop（tikv-worker 16c32G）**：优先 c6in 以减少节点数并吃满 S3 带宽
+### Node Sizing and Throughput (i8g.4xlarge)
 
-### Spot / Savings Plans（降本思路）
-- **Spot**：价格最低但可中断，适合 DXF/remote-cop 批处理，可显著降低导入成本。
-- **Savings Plans**：按 $/小时承诺 1 或 3 年，适合控制面与常驻计算面节点。
+Assume AWS peak network bandwidth and 40% to 60% effective throughput:
+- i8g.4xlarge (16 vCPU, 128 GiB): 25 Gbps -> 4.5 to 6.8 TB/h per node
 
-### 权限与安全
+Target throughput to node count:
+| Target | Required Throughput | i8g.4xlarge Nodes |
+| --- | ---: | ---: |
+| 35 TB / 2h | 17.5 TB/h | 3 to 4 |
+| 175 TB / 2h | 87.5 TB/h | 13 to 20 |
+| upsert (r=70%) | 201 TB/h | 30 to 45 |
 
-复用 IMPORT INTO 权限检查；`SHOW IMPORT *` 通过作业所有者或 super 权限访问。
+Recommended roles:
+- Control plane (TiDB 8c16G): fixed 3 nodes (HA)
+- Compute plane (TiDB 16c32G): about 1 to 2x the remote-cop node count
+- Remote cop (tikv-worker i8g.4xlarge): local 3.75TB NVMe, 25 Gbps network
 
-### 兼容性与回滚
+### Spot and Savings Plans (cost reduction)
+- Spot: lowest cost but interruptible; suitable for DXF and remote-cop batch workloads.
+- Savings Plans: commit per hour for 1 or 3 years; suitable for control plane and steady compute nodes.
 
-- 不影响现有 IMPORT INTO 默认行为。
-- 仅在 `WITH full/delta` 时启用增量逻辑。
-- 任务失败不替换 active base，保持基线不变。
+### Privileges and Security
 
-### 版本保留与周期 Compaction（后台 DXF 任务）
+Reuse IMPORT INTO privilege checks; SHOW IMPORT * is gated by job owner or SUPER.
 
-为支持审计/回滚与追溯风险控制，允许保留多天 base+delta 版本；保留期结束后，通过后台 DXF 任务做版本 compaction：
+### Compatibility and Rollback
 
-- **保留窗口**：默认保留 10 天版本，可通过系统变量 `tidb_import_into_base_retention_days` 调整。
-- **触发方式**：仅由 DDL owner 定时扫描 import job + base manifest（create_time），存在超过保留期的 base 时触发，对用户无感知；运行中的导入任务会跳过。
-- **输入**：最新 base manifest（作为重写源），旧版本仅用于校验与回滚。
-- **输出**：生成新的 compacted base manifest（合并范围/减少小文件），写入新的 base 版本。
-- **实现路径**：PlanTouchedRegions（ForceAllRegions）生成全量变更范围 -> RegionMergeAndRebuild 重写 base；不走 DeltaEncodeAndSort 与 IngestChangedRegions。
-- **约束**：compaction 需 base manifest 已存在，缺失则任务失败。
-- **一致性保障**：compaction 完成前不删除旧版本；完成后对新 manifest 做校验（checksum/row_count/bytes），再执行 GC。
-- **GC 策略**：仅当最新 base 为 compaction 产物时，删除超过保留期的 base 版本与孤儿对象，确保回滚窗口内数据可追溯。
+- No change to default IMPORT INTO behavior.
+- Delta logic only when WITH full or delta is used.
+- On failure, do not replace the active base; keep the baseline unchanged.
 
-存储量近似公式：`Total ≈ Base + RetentionDays × DailyChanged`（仅统计变更 region 文件，不含临时文件开销）。
-示例（默认 10 天、DailyChanged=175TB）：`Total ≈ 175 + 10×175 = 1,925 TB`。
-该策略在控制存储成本的同时，避免频繁回写导致的版本碎片化，降低长期 merge 风险。
+### Version Retention and Periodic Compaction (background DXF task)
+
+To support audit and rollback, retain multiple days of base and delta versions. After retention expires, run a background DXF compaction task:
+
+- Retention window: default 10 days; configurable via tidb_import_into_base_retention_days.
+- Trigger: DDL owner periodically scans import jobs and base manifests (create_time) and triggers compaction for expired bases; running imports are skipped.
+- Input: latest base manifest (rewrite source); old versions only for validation and rollback.
+- Output: new compacted base manifest (merge ranges and reduce small files), written as a new base version.
+- Path: PlanTouchedRegions (ForceAllRegions) generates full range -> RegionMergeAndRebuild rewrites base; skip DeltaEncodeAndSort and IngestChangedRegions.
+- Constraint: compaction requires base manifest; fail if missing.
+- Consistency: keep old versions until compaction finishes; verify checksum, row_count, and bytes before GC.
+- GC policy: only delete expired base versions and orphan objects if the latest base is a compaction product.
+
+Storage estimate: Total ~= Base + RetentionDays * DailyChanged (changed-region files only, not temporary files).
+Example (10 days, DailyChanged=175TB): Total ~= 175 + 10*175 = 1,925 TB.
+This controls storage cost and avoids long-term merge fragmentation.
 
 ## Test Design
 
 ### Functional Tests
 
-- `WITH full/delta` 选项解析与互斥检查；delta 无 base_version 时自动解析目标表 TiKV 元数据生成 base 视图。
-- Base/Changed Regions manifest 读写与内容正确性。
-- Delta pipeline 步骤序列与自动 ingest。
-- `SHOW IMPORT BASES/REGIONS/CHANGED` 输出校验。
-- `SHOW IMPORT METERING/COST` 聚合与字段映射校验。
+- Parse and validate WITH full/delta; delta without base_version derives base from TiKV metadata.
+- Base and changed regions manifest read/write and correctness.
+- Delta pipeline step order and auto ingest.
+- SHOW IMPORT BASES/REGIONS/CHANGED output validation.
+- SHOW IMPORT METERING/COST aggregation and field mapping.
 
 ### Scenario Tests
 
-- 宽表部分列更新（稀疏更新）正确性。
-- delta 内重复主键记录按 `merge_strategy` 归并。
-- 无 base_version 时自动解析目标表 TiKV 元数据；解析失败则报错。
-- 失败重试不影响 base 版本一致性。
+- Sparse updates on wide tables are correct.
+- Duplicate primary keys within delta resolve by merge_strategy.
+- Delta without base_version derives base from TiKV metadata; fail if unresolved.
+- Retries do not break base version consistency.
 
 ### Compatibility Tests
 
-- 与现有 IMPORT INTO（无 full/delta）兼容。
-- 与 global sort/local sort 的行为一致性验证。
-- 权限与审计逻辑不回归。
+- Compatible with existing IMPORT INTO (no full/delta).
+- Consistency between global sort and local sort behaviors.
+- Privilege and audit logic unchanged.
 
 ### Benchmark Tests
 
-- 对比现有 IMPORT INTO 吞吐与 delta 流水线吞吐。
-- 评估仅 ingest 变更 region 对 TiKV 写入与 compaction 的影响。
+- Compare throughput against existing IMPORT INTO.
+- Measure impact of ingesting only changed regions on TiKV write and compaction.
 
 ## Impacts & Risks
 
 ### Impacts
 
-- 导入链路可实现“只 ingest 变更 region”，显著降低无效写入与 compaction 成本。
-- 可通过 metering/cost 查询实现导入可观测与成本追踪。
+- Ingest only changed regions, significantly reducing unnecessary writes and compaction cost.
+- Metering and cost queries provide observability and cost tracking.
 
 ### Risks
 
-- RegionMerge 需要解码与重建 data/index KV，CPU 与 IO 压力较大。
-- 稀疏列编码/合并逻辑复杂，需完善测试覆盖。
-- 计量存储缺失或配置错误时，`SHOW IMPORT METERING/COST` 可能不可用。
+- RegionMerge requires decode and rebuild of data and index KV, high CPU and IO load.
+- Sparse row encoding and merge logic is complex and needs thorough tests.
+- If metering storage is missing or misconfigured, SHOW IMPORT METERING/COST may be unavailable.
 
 ## Investigation & Alternatives
 
-- 直接在 TiKV 做逐行 upsert 会引入大量随机写，吞吐不足。
-- 通过人工命令触发变更 region ingest 违背“自动化”需求，已被替换为 delta 自动 ingest。
+- Row-level upsert inside TiKV would introduce heavy random writes and low throughput.
+- Manual commands to ingest changed regions violate automation requirements and are replaced by automatic delta ingest.
 
 ## Unresolved Questions
 
-- 是否需要将成本模型做成可配置价格表（多云厂商、多 region）？
-- Base 保留策略（保留多少版本、自动清理策略）是否需要进一步标准化？
+- Should the cost model be a configurable price list (multi-cloud and multi-region)?
+- Should base retention policy (how many versions and cleanup strategy) be standardized further?
