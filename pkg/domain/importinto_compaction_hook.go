@@ -17,3 +17,7 @@ package domain
 // StartImportIntoCompactionWorker is injected by the importinto package to start
 // the background base compaction worker after dist task initialization.
 var StartImportIntoCompactionWorker func(do *Domain, run func(exec func(), label string), exit <-chan struct{})
+
+// StartImportIntoSLOGuardWorker is injected by the importinto package to start
+// the background SLO guard worker after dist task initialization.
+var StartImportIntoSLOGuardWorker func(do *Domain, run func(exec func(), label string), exit <-chan struct{})

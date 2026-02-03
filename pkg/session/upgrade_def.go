@@ -473,6 +473,14 @@ const (
 	// version253
 	// Add last_used_date to mysql.bind_info
 	version253 = 253
+
+	// version254
+	// Add mysql.tidb_import_slo_guard table.
+	version254 = 254
+
+	// version255
+	// Add config JSON column to mysql.tidb_import_slo_guard.
+	version255 = 255
 )
 
 // versionedUpgradeFunction is a struct that holds the upgrade function related
@@ -486,7 +494,7 @@ type versionedUpgradeFunction struct {
 
 // currentBootstrapVersion is defined as a variable, so we can modify its value for testing.
 // please make sure this is the largest version
-var currentBootstrapVersion int64 = version253
+var currentBootstrapVersion int64 = version255
 
 var (
 	// this list must be ordered by version in ascending order, and the function
@@ -664,6 +672,8 @@ var (
 		{version: version251, fn: upgradeToVer251},
 		{version: version252, fn: upgradeToVer252},
 		{version: version253, fn: upgradeToVer253},
+		{version: version254, fn: upgradeToVer254},
+		{version: version255, fn: upgradeToVer255},
 	}
 )
 
@@ -2037,4 +2047,13 @@ func upgradeToVer252(s sessionapi.Session, _ int64) {
 
 func upgradeToVer253(s sessionapi.Session, _ int64) {
 	doReentrantDDL(s, "ALTER TABLE mysql.bind_info ADD COLUMN last_used_date DATE DEFAULT NULL AFTER `plan_digest`", infoschema.ErrColumnExists)
+}
+
+func upgradeToVer254(s sessionapi.Session, _ int64) {
+	mustExecute(s, metadef.CreateTiDBImportSLOGuardTable)
+	mustExecute(s, "INSERT IGNORE INTO mysql.tidb_import_slo_guard (job_id, enable, pause_threshold, slow_apply_rate_limit_mb_per_sec) VALUES (0, 0, '10ms', 64)")
+}
+
+func upgradeToVer255(s sessionapi.Session, _ int64) {
+	doReentrantDDL(s, "ALTER TABLE mysql.tidb_import_slo_guard ADD COLUMN `config` JSON DEFAULT NULL AFTER `job_id`", infoschema.ErrColumnExists)
 }

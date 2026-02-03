@@ -150,6 +150,8 @@ const (
 	TiDBKernelOptionsTableID = ReservedGlobalIDUpperBound - 58
 	// TiDBWorkloadValuesTableID is the table ID of `tidb_workload_values`.
 	TiDBWorkloadValuesTableID = ReservedGlobalIDUpperBound - 59
+	// TiDBImportSLOGuardTableID is the table ID of `tidb_import_slo_guard`.
+	TiDBImportSLOGuardTableID = ReservedGlobalIDUpperBound - 61
 	// SysDatabaseID is the database ID of `sys`.
 	SysDatabaseID = ReservedGlobalIDUpperBound - 60
 )

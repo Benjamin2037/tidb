@@ -1085,6 +1085,9 @@ func (do *Domain) InitDistTaskLoop() error {
 		if StartImportIntoCompactionWorker != nil {
 			StartImportIntoCompactionWorker(do, do.wg.Run, do.exit)
 		}
+		if StartImportIntoSLOGuardWorker != nil {
+			StartImportIntoSLOGuardWorker(do, do.wg.Run, do.exit)
+		}
 		return nil
 	}
 	if kv.IsSystemKS(do.store) {
@@ -1156,6 +1159,9 @@ func (do *Domain) InitDistTaskLoop() error {
 	}
 	if StartImportIntoCompactionWorker != nil {
 		StartImportIntoCompactionWorker(do, do.wg.Run, do.exit)
+	}
+	if StartImportIntoSLOGuardWorker != nil {
+		StartImportIntoSLOGuardWorker(do, do.wg.Run, do.exit)
 	}
 	return nil
 }

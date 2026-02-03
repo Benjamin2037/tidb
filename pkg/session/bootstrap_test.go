@@ -54,7 +54,7 @@ import (
 )
 
 func TestMySQLDBTables(t *testing.T) {
-	require.Len(t, tablesInSystemDatabase, 52,
+	require.Len(t, tablesInSystemDatabase, 53,
 		"remember to add the new tables to versionedBootstrapSchemas too")
 	testTableBasicInfoSlice(t, tablesInSystemDatabase)
 	reservedIDs := make([]int64, 0, len(ddlTableVersionTables)*2)
@@ -1691,6 +1691,65 @@ func TestTiDBUpgradeToVer252(t *testing.T) {
 	createTblSQL = getBindInfoSQLFn(seCurVer)
 	require.Contains(t, createTblSQL, "`create_time` timestamp(6)")
 	require.Contains(t, createTblSQL, "`update_time` timestamp(6)")
+}
+
+func TestTiDBUpgradeToVer255(t *testing.T) {
+	// NOTE: this case needed to be passed in both classic and next-gen kernel.
+	ctx := context.Background()
+	store, dom := CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	ver253 := version253
+	seV253 := CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(ver253))
+	require.NoError(t, err)
+	RevertVersionAndVariables(t, seV253, ver253)
+	err = txn.Commit(ctx)
+	require.NoError(t, err)
+	store.SetOption(StoreBootstrappedKey, nil)
+
+	// Simulate the pre-255 schema (table exists but lacks config column).
+	mustExecute(seV253, "DROP TABLE IF EXISTS mysql.tidb_import_slo_guard")
+	mustExecute(seV253, `CREATE TABLE mysql.tidb_import_slo_guard (
+		job_id bigint(64) NOT NULL DEFAULT 0,
+		enable tinyint(1) NOT NULL DEFAULT 0,
+		pause_threshold varchar(32) NOT NULL DEFAULT '10ms',
+		slow_apply_rate_limit_mb_per_sec bigint(64) NOT NULL DEFAULT 64,
+		updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+		updated_by VARCHAR(300) NOT NULL DEFAULT '',
+		PRIMARY KEY (job_id)
+	)`)
+
+	dom.Close()
+	domCurVer, err := BootstrapSession(store)
+	require.NoError(t, err)
+	defer domCurVer.Close()
+	seCurVer := CreateSessionAndSetID(t, store)
+	ver, err := GetBootstrapVersion(seCurVer)
+	require.NoError(t, err)
+	require.Equal(t, currentBootstrapVersion, ver)
+
+	res := MustExecToRecodeSet(t, seCurVer, "show create table mysql.tidb_import_slo_guard")
+	chk := res.NewChunk(nil)
+	err = res.Next(ctx, chk)
+	require.NoError(t, err)
+	require.Equal(t, 1, chk.NumRows())
+	createTblSQL := string(chk.GetRow(0).GetBytes(1))
+	require.Contains(t, createTblSQL, "`config` json")
+
+	res = MustExecToRecodeSet(t, seCurVer, "select job_id, enable, pause_threshold, slow_apply_rate_limit_mb_per_sec from mysql.tidb_import_slo_guard where job_id=0")
+	chk = res.NewChunk(nil)
+	err = res.Next(ctx, chk)
+	require.NoError(t, err)
+	require.Equal(t, 1, chk.NumRows())
+	row := chk.GetRow(0)
+	require.Equal(t, int64(0), row.GetInt64(0))
+	require.Equal(t, int64(0), row.GetInt64(1))
+	require.Equal(t, "10ms", row.GetString(2))
+	require.Equal(t, int64(64), row.GetInt64(3))
 }
 
 func TestWriteClusterIDToMySQLTiDBWhenUpgradingTo242(t *testing.T) {

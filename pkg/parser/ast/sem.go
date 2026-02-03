@@ -242,6 +242,8 @@ const (
 	ShowImportCostCommand = "SHOW IMPORT COST"
 	// ShowImportMeteringCommand represents SHOW IMPORT METERING statement
 	ShowImportMeteringCommand = "SHOW IMPORT METERING"
+// ShowImportIntoSLOGuardCommand represents SHOW IMPORT SLO GUARD statement
+ShowImportIntoSLOGuardCommand = "SHOW IMPORT SLO GUARD"
 	// ShowPlacementCommand represents SHOW PLACEMENT statement
 	ShowPlacementCommand = "SHOW PLACEMENT"
 	// ShowPlacementForDatabaseCommand represents SHOW PLACEMENT FOR DATABASE statement
@@ -417,6 +419,8 @@ const (
 	HelpCommand = "HELP"
 	// CancelImportIntoJobCommand represents CANCEL IMPORT INTO JOB statement
 	CancelImportIntoJobCommand = "CANCEL IMPORT INTO JOB"
+// AlterImportIntoSLOGuardCommand represents ALTER IMPORT SLO GUARD statement
+AlterImportIntoSLOGuardCommand = "ALTER IMPORT SLO GUARD"
 	// KillCommand represents KILL statement
 	KillCommand = "KILL"
 	// PlanReplayerCommand represents PLAN REPLAYER statement
@@ -833,6 +837,8 @@ func (n *ShowStmt) SEMCommand() string {
 		return ShowImportCostCommand
 	case ShowImportMetering:
 		return ShowImportMeteringCommand
+	case ShowImportIntoSLOGuard:
+		return ShowImportIntoSLOGuardCommand
 	case ShowPlacement:
 		return ShowPlacementCommand
 	case ShowPlacementForDatabase:
@@ -1097,6 +1103,11 @@ func (n *HelpStmt) SEMCommand() string {
 // SEMCommand returns the command string for the statement.
 func (n *ImportIntoActionStmt) SEMCommand() string {
 	return CancelImportIntoJobCommand
+}
+
+// SEMCommand returns the command string for the statement.
+func (n *AlterImportIntoSLOGuardStmt) SEMCommand() string {
+	return AlterImportIntoSLOGuardCommand
 }
 
 // SEMCommand returns the command string for the statement.

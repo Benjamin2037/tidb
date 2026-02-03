@@ -83,6 +83,7 @@ func TestShow(t *testing.T) {
 		ast.ShowMasterStatus,
 		ast.ShowBackups,
 		ast.ShowRestores,
+		ast.ShowImportIntoSLOGuard,
 	}
 	for _, tp := range tps {
 		node.Tp = tp
@@ -91,6 +92,18 @@ func TestShow(t *testing.T) {
 			require.Greater(t, col.RetType.GetFlen(), 0)
 		}
 	}
+}
+
+func TestBuildAlterImportIntoSLOGuard(t *testing.T) {
+	parser := parser.New()
+	sctx := coretestsdk.MockContext()
+	builder, _ := NewPlanBuilder().Init(sctx, nil, hint.NewQBHintHandler(nil))
+	stmt, err := parser.ParseOneStmt("alter import slo guard with config='{}'", "", "")
+	require.NoError(t, err)
+	plan, err := builder.Build(context.Background(), resolve.NewNodeW(stmt))
+	require.NoError(t, err)
+	_, ok := plan.(*Simple)
+	require.True(t, ok)
 }
 
 func TestGetPathByIndexName(t *testing.T) {

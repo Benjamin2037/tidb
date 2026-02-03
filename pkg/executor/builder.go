@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/tidb/pkg/domain"
 	"github.com/pingcap/tidb/pkg/executor/aggfuncs"
 	"github.com/pingcap/tidb/pkg/executor/aggregate"
+	"github.com/pingcap/tidb/pkg/executor/importer"
 	"github.com/pingcap/tidb/pkg/executor/internal/builder"
 	"github.com/pingcap/tidb/pkg/executor/internal/calibrateresource"
 	"github.com/pingcap/tidb/pkg/executor/internal/exec"
@@ -970,6 +971,16 @@ func (b *executorBuilder) buildSimple(v *plannercore.Simple) exec.Executor {
 			BaseExecutor: exec.NewBaseExecutor(b.ctx, nil, 0),
 			tp:           s.Tp,
 			jobID:        s.JobID,
+		}
+	case *ast.AlterImportIntoSLOGuardStmt:
+		jobID := importer.SLOGuardGlobalJobID
+		if s.JobID != nil {
+			jobID = *s.JobID
+		}
+		return &ImportIntoSLOGuardExec{
+			BaseExecutor: exec.NewBaseExecutor(b.ctx, nil, 0),
+			jobID:        jobID,
+			options:      s.Options,
 		}
 	case *ast.CancelDistributionJobStmt:
 		return &CancelDistributionJobExec{

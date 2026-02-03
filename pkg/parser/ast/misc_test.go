@@ -46,6 +46,7 @@ func TestMiscVisitorCover(t *testing.T) {
 	stmts := []ast.Node{
 		&ast.AdminStmt{},
 		&ast.AlterUserStmt{},
+		&ast.AlterImportIntoSLOGuardStmt{},
 		&ast.BeginStmt{},
 		&ast.BinlogStmt{},
 		&ast.CommitStmt{},

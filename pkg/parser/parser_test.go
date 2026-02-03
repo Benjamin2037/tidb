@@ -789,6 +789,10 @@ func TestDMLStmt(t *testing.T) {
 		{"import into t from '/file.csv' with detached", true, "IMPORT INTO `t` FROM '/file.csv' WITH detached"},
 		{"import into `t` from '/file.csv' with thread=1", true, "IMPORT INTO `t` FROM '/file.csv' WITH thread=1"},
 		{"import into `t` from '/file.csv' with detached, thread=1", true, "IMPORT INTO `t` FROM '/file.csv' WITH detached, thread=1"},
+		{"alter import slo guard with config='{\"enable\":true}'", true, "ALTER IMPORT SLO GUARD WITH config='{\"enable\":true}'"},
+		{"alter import slo guard job 3 with config='{\"pause_threshold\":\"10ms\",\"slow_apply_rate_limit_mb_per_sec\":64}'", true, "ALTER IMPORT SLO GUARD JOB 3 WITH config='{\"pause_threshold\":\"10ms\",\"slow_apply_rate_limit_mb_per_sec\":64}'"},
+		{"show import slo guard", true, "SHOW IMPORT SLO GUARD"},
+		{"show import slo guard job 3", true, "SHOW IMPORT SLO GUARD JOB 3"},
 
 		// select for update/share
 		{"select * from t for update", true, "SELECT * FROM `t` FOR UPDATE"},
