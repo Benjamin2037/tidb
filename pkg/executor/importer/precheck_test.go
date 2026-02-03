@@ -107,6 +107,7 @@ func createMockETCD(t *testing.T) (string, *embed.Etcd) {
 }
 
 func TestCheckRequirements(t *testing.T) {
+	skipIfCannotListen(t)
 	store := testkit.CreateMockStore(t)
 	tk := testkit.NewTestKit(t, store)
 	ctx := util.WithInternalSourceType(context.Background(), kv.InternalImportInto)

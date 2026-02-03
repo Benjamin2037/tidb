@@ -377,9 +377,9 @@ type Summary struct {
 	BaseID           string `json:"base-id,omitempty"`
 	BaseURI          string `json:"base-uri,omitempty"`
 	BaseManifestPath string `json:"base-manifest-path,omitempty"`
-
-	// ChangedRegionsPath stores the delta changed regions manifest path.
+	// Changed regions manifest info for delta.
 	ChangedRegionsPath string `json:"changed-regions-path,omitempty"`
+	DeltaURI           string `json:"delta-uri,omitempty"`
 }
 
 // LoadDataController load data controller.
@@ -1301,6 +1301,10 @@ func estimateCompressionRatio(
 ) (float64, error) {
 	if tp != mydump.SourceTypeParquet {
 		return 1.0, nil
+	}
+	if fileSize == 0 {
+		// Empty parquet files have no rows; return the default ratio without probing.
+		return 2.0, nil
 	}
 	failpoint.Inject("skipEstimateCompressionForParquet", func(val failpoint.Value) {
 		if v, ok := val.(bool); ok && v {

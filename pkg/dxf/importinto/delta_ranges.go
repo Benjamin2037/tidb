@@ -32,6 +32,8 @@ func decodeHexKey(hexStr string) ([]byte, error) {
 	return b, nil
 }
 
+// rangesOverlap returns true when [startA, endA) intersects [startB, endB).
+// Empty end means unbounded.
 func rangesOverlap(startA, endA, startB, endB []byte) bool {
 	if len(endA) > 0 && bytes.Compare(endA, startB) <= 0 {
 		return false
@@ -42,6 +44,7 @@ func rangesOverlap(startA, endA, startB, endB []byte) bool {
 	return true
 }
 
+// withinRange checks whether key is in [start, end). Empty end means unbounded.
 func withinRange(key, start, end []byte) bool {
 	if len(start) > 0 && bytes.Compare(key, start) < 0 {
 		return false

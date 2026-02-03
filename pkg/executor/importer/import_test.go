@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/expression"
 	tidbkv "github.com/pingcap/tidb/pkg/kv"
+	"github.com/pingcap/tidb/pkg/lightning/common"
 	"github.com/pingcap/tidb/pkg/lightning/config"
+	"github.com/pingcap/tidb/pkg/lightning/mydump"
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tidb/pkg/parser/ast"
 	plannercore "github.com/pingcap/tidb/pkg/planner/core"
@@ -266,15 +267,15 @@ func TestAdjustOptions(t *testing.T) {
 }
 
 func TestAdjustDiskQuota(t *testing.T) {
-	err := failpoint.Enable("github.com/pingcap/tidb/pkg/lightning/common/GetStorageSize", "return(2048)")
-	require.NoError(t, err)
-	defer func() {
-		_ = failpoint.Disable("github.com/pingcap/tidb/pkg/lightning/common/GetStorageSize")
-	}()
 	d := t.TempDir()
-	require.Equal(t, int64(1638), adjustDiskQuota(0, d, logutil.BgLogger()))
+	sz, err := common.GetStorageSize(d)
+	if err != nil {
+		t.Skipf("skip test: storage size unavailable: %v", err)
+	}
+	maxDiskQuota := int64(float64(sz.Capacity) * 0.8)
+	require.Equal(t, maxDiskQuota, adjustDiskQuota(0, d, logutil.BgLogger()))
 	require.Equal(t, int64(1), adjustDiskQuota(1, d, logutil.BgLogger()))
-	require.Equal(t, int64(1638), adjustDiskQuota(2000, d, logutil.BgLogger()))
+	require.Equal(t, maxDiskQuota, adjustDiskQuota(maxDiskQuota+1, d, logutil.BgLogger()))
 }
 
 func TestASTArgsFromStmt(t *testing.T) {
@@ -575,6 +576,12 @@ func TestParseFileType(t *testing.T) {
 			require.Equal(t, tc.expected, actual)
 		})
 	}
+}
+
+func TestEstimateCompressionRatioEmptyParquet(t *testing.T) {
+	ratio, err := estimateCompressionRatio(context.Background(), "dummy.parquet", 0, mydump.SourceTypeParquet, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2.0, ratio)
 }
 
 func TestGetDefMaxEngineSize(t *testing.T) {

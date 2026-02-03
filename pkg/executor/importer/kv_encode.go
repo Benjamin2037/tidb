@@ -81,12 +81,13 @@ func newTableKVEncoderInner(
 		return nil, err
 	}
 
+	enableDelta := enableDeltaEncoding && ctrl != nil && ctrl.Plan != nil && ctrl.UpsertMode == UpsertModeDelta
 	return &TableKVEncoder{
-		BaseKVEncoder:     baseKVEncoder,
-		columnAssignments: colAssignExprs,
-		fieldMappings:     fieldMappings,
-		insertColumns:     insertColumns,
-		enableDeltaRowEncoding: enableDeltaEncoding && ctrl.UpsertMode == UpsertModeDelta,
+		BaseKVEncoder:          baseKVEncoder,
+		columnAssignments:      colAssignExprs,
+		fieldMappings:          fieldMappings,
+		insertColumns:          insertColumns,
+		enableDeltaRowEncoding: enableDelta,
 	}, nil
 }
 
@@ -106,6 +107,8 @@ func (en *TableKVEncoder) Encode(row []types.Datum, rowID int64) (*kv.Pairs, err
 	if err != nil {
 		return nil, err
 	}
+	// Delta mode prefixes record KV values with a column bitmap for sparse updates.
+	// Index KVs keep the original value format to avoid breaking downstream readers.
 	if en.enableDeltaRowEncoding {
 		bitmap := BuildColumnBitmap(en.hasValueCache)
 		for i := range kvPairs.Pairs {

@@ -704,10 +704,12 @@ func NewBackendForTest(ctx context.Context, config BackendConfig, storeHelper St
 	if err != nil {
 		return nil, err
 	}
+	writeLimiter := newStoreWriteLimiter(config.StoreWriteBWLimit)
 	local := &Backend{
 		BackendConfig: config,
 		logger:        logger,
 		engineMgr:     engineMgr,
+		writeLimiter:  writeLimiter,
 	}
 	if m, ok := metric.GetCommonMetric(ctx); ok {
 		local.metrics = m
@@ -815,12 +817,22 @@ func (local *Backend) tikvSideCheckFreeSpace(ctx context.Context) {
 
 // Close the local backend.
 func (local *Backend) Close() {
-	local.engineMgr.close()
-	local.importClientFactory.close()
+	if local.engineMgr != nil {
+		local.engineMgr.close()
+	}
+	if local.importClientFactory != nil {
+		local.importClientFactory.close()
+	}
 
-	_ = local.tikvCli.Close()
-	local.pdHTTPCli.Close()
-	local.pdCli.Close()
+	if local.tikvCli != nil {
+		_ = local.tikvCli.Close()
+	}
+	if local.pdHTTPCli != nil {
+		local.pdHTTPCli.Close()
+	}
+	if local.pdCli != nil {
+		local.pdCli.Close()
+	}
 	if local.nextgenHTTPCli != nil {
 		local.nextgenHTTPCli.CloseIdleConnections()
 	}

@@ -193,3 +193,22 @@ func ReadChangedRegionsManifest(ctx context.Context, store storeapi.Storage, man
 	}
 	return &m, nil
 }
+
+// RemoveBaseVersion deletes all files under the base version directory.
+func RemoveBaseVersion(ctx context.Context, store storeapi.Storage, baseID string) error {
+	if baseID == "" {
+		return errors.New("base id is empty")
+	}
+	subdir := path.Join(baseManifestDirName, baseID)
+	files := make([]string, 0, 64)
+	if err := store.WalkDir(ctx, &storeapi.WalkOption{SubDir: subdir}, func(p string, _ int64) error {
+		files = append(files, p)
+		return nil
+	}); err != nil {
+		return errors.Trace(err)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return store.DeleteFiles(ctx, files)
+}

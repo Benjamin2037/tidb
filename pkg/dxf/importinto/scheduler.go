@@ -610,6 +610,7 @@ func updateTaskSummary(
 	case proto.ImportStepPlanTouchedRegions:
 		if taskMeta.Plan.IsUpsertDelta() {
 			taskMeta.Summary.ChangedRegionsPath = ChangedRegionsPath(taskMeta.JobID)
+			taskMeta.Summary.DeltaURI = taskMeta.Plan.CloudStorageURI
 		}
 	case proto.ImportStepRegionMergeAndRebuild:
 		if taskMeta.Plan.IsUpsertDelta() {
@@ -722,15 +723,6 @@ func (sch *importScheduler) finishJob(ctx context.Context, logger *zap.Logger,
 		return err
 	}
 
-	tableStatsDelta := &statsstorage.DeltaUpdate{
-		Delta: variable.TableDelta{
-			Delta:    taskMeta.Summary.ImportedRows,
-			Count:    taskMeta.Summary.ImportedRows,
-			InitTime: time.Now(),
-			TableID:  taskMeta.Plan.TableInfo.ID,
-		},
-		TableID: taskMeta.Plan.TableInfo.ID,
-	}
 	// retry for 3+6+12+24+(30-4)*30 ~= 825s ~= 14 minutes
 	backoffer := backoff.NewExponential(scheduler.RetrySQLInterval, 2, scheduler.RetrySQLMaxInterval)
 	return handle.RunWithRetry(ctx, scheduler.RetrySQLTimes, backoffer, logger,
@@ -740,20 +732,34 @@ func (sch *importScheduler) finishJob(ctx context.Context, logger *zap.Logger,
 				if err2 != nil {
 					return err2
 				}
-
-				// we only fill the delta change of the table when the task is
-				// done, and let auto-analyze to do analyzing. depending on the
-				// table size, analyze might take a long time, so we won't wait
-				// for it.
-				// auto analyze is triggered when the table have more than
-				// AutoAnalyzeMinCnt(1000) rows, and tidb_auto_analyze_ratio(0.5)
-				// portion of rows are changed, see NeedAnalyzeTable too.
-				// so if the table is small, there is no analyze triggered.
-				if err := statsstorage.UpdateStatsMeta(ctx, se, txn.StartTS(), tableStatsDelta); err != nil {
-					logger.Warn("flush table stats failed", zap.Error(err))
-				}
 				exec := se.GetSQLExecutor()
-				return importer.FinishJob(ctx, exec, taskMeta.JobID, &taskMeta.Summary)
+				importedRows := taskMeta.Summary.ImportedRows
+				if importedRows != 0 {
+					tableStatsDelta := &statsstorage.DeltaUpdate{
+						Delta: variable.TableDelta{
+							Delta:    importedRows,
+							Count:    importedRows,
+							InitTime: time.Now(),
+							TableID:  taskMeta.Plan.TableInfo.ID,
+						},
+						TableID: taskMeta.Plan.TableInfo.ID,
+					}
+					// we only fill the delta change of the table when the task is
+					// done, and let auto-analyze to do analyzing. depending on the
+					// table size, analyze might take a long time, so we won't wait
+					// for it.
+					// auto analyze is triggered when the table have more than
+					// AutoAnalyzeMinCnt(1000) rows, and tidb_auto_analyze_ratio(0.5)
+					// portion of rows are changed, see NeedAnalyzeTable too.
+					// so if the table is small, there is no analyze triggered.
+					if err := statsstorage.UpdateStatsMeta(ctx, se, txn.StartTS(), tableStatsDelta); err != nil {
+						logger.Warn("flush table stats failed", zap.Error(err))
+					}
+				}
+				if err := importer.FinishJob(ctx, exec, taskMeta.JobID, &taskMeta.Summary); err != nil {
+					return err
+				}
+				return nil
 			})
 		},
 	)

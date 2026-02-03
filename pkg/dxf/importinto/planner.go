@@ -736,7 +736,8 @@ func generateIngestChangedRegionsSpecs(planCtx planner.PlanCtx, p *LogicalPlan) 
 	}
 	defer deltaStore.Close()
 
-	changedRegions, err := ReadChangedRegionsManifest(ctx, deltaStore, ChangedRegionsPath(p.JobID))
+	sourceJobID := p.JobID
+	changedRegions, err := ReadChangedRegionsManifest(ctx, deltaStore, ChangedRegionsPath(sourceJobID))
 	if err != nil {
 		return nil, err
 	}
@@ -744,7 +745,7 @@ func generateIngestChangedRegionsSpecs(planCtx planner.PlanCtx, p *LogicalPlan) 
 		return nil, nil
 	}
 
-	outputBaseID := defaultBaseID(p.JobID)
+	outputBaseID := defaultBaseID(sourceJobID)
 	baseManifest, err := ReadBaseManifest(ctx, baseStore, BaseManifestPath(outputBaseID))
 	if err != nil {
 		return nil, err

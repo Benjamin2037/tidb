@@ -55,6 +55,9 @@ func TestImportFromSelectCleanup(t *testing.T) {
 	tidbCfg := tidb.GetGlobalConfig()
 	tidbCfg.TempDir = t.TempDir()
 	checkImportDirEmpty(t)
+	if !importerFailpointsEnabled() {
+		t.Skip("failpoint instrumentation is not enabled")
+	}
 
 	require.NoError(t, failpoint.Enable("github.com/pingcap/tidb/pkg/executor/importer/mockImportFromSelectErr", `return(true)`))
 	t.Cleanup(func() {

@@ -44,4 +44,3 @@ func (m UpsertMode) IsDelta() bool {
 func (m UpsertMode) IsFull() bool {
 	return m == UpsertModeFull
 }
-

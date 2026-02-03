@@ -266,6 +266,7 @@ func TestGetTaskImportedRows(t *testing.T) {
 }
 
 func TestShowImportProgress(t *testing.T) {
+	skipIfCannotListen(t)
 	testfailpoint.Enable(t, "github.com/pingcap/tidb/pkg/domain/MockDisableDistTask", "return(true)")
 
 	fmap := plannercore.ImportIntoFieldMap
