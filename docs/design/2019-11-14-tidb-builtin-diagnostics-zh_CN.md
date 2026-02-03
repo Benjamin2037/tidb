@@ -1,35 +1,35 @@
-# RFC: TiDB 内置 SQL 诊断
+# RFC: TiDB Built-in SQL Diagnostics
 
 ## Summary
 
-目前 TiDB 获取诊断信息主要依赖外部工具（perf/iosnoop/iotop/vmstat/sar/...）、监控系统（Prometheus/Grafana）、日志文件、HTTP API 和 TiDB 提供的系统表。分散的工具链和繁杂的获取方式导致 TiDB 的集群的使用门槛高、运维难度大、不能提前发现问题以及遇到问题不能及时排查、诊断和恢复集群等。
+Today TiDB diagnostics rely mainly on external tools (perf/iosnoop/iotop/vmstat/sar/... ), monitoring systems (Prometheus/Grafana), log files, HTTP APIs, and TiDB system tables. The fragmented toolchain and complex access paths raise the entry bar for operating a TiDB cluster, increase operational cost, make it hard to discover issues early, and slow down troubleshooting, diagnosis, and recovery.
 
-本提案提出一种新的方法，在 TiDB 中内置获取诊断信息的功能，并将诊断信息使用系统表的形式对外暴露，使用户可以使用 SQL 的方式进行查询。
+This proposal adds built-in diagnostics in TiDB and exposes the data via system tables, so users can query diagnostics with SQL.
 
 ## Motivation
 
-本提案主要解决 TiDB 在获取诊断信息过程中的以下问题：
+This proposal addresses the following pain points in TiDB diagnostics:
 
-- 工具链分散，需要在不同工具之间来回切换，且部分 Linux 发行版未内置相应工具或内置工具的版本不一致。
-- 信息获取方式不一致，比如有 SQL、HTTP、导出监控、登录各个节点查看日志等。
-- TiDB 集群组件较多，对不同组件的监控进行对比和关联低效且繁琐。
-- TiDB 没有集中日志管理组件，没有高效的手段对整个集群的日志进行过滤、检索、分析、聚合。
-- 系统表只包含当前节点信息，不能体现整个集群的状态，如：SLOW_QUERY, PROCESSLIST, STATEMENTS_SUMMARY。
+- Toolchains are fragmented. Users need to switch between tools, and some Linux distributions do not ship these tools or ship different versions.
+- Diagnostic access paths are inconsistent: SQL, HTTP, exported metrics, or logging into each node to inspect logs.
+- There are many TiDB cluster components; comparing and correlating metrics across components is inefficient.
+- TiDB has no centralized log management, so filtering, searching, analyzing, and aggregating logs for the whole cluster is hard.
+- System tables only contain the current node state and do not reflect the whole cluster, such as SLOW_QUERY, PROCESSLIST, STATEMENTS_SUMMARY.
 
-在通过提供多维度集群级别系统表和集群诊断规则框架之后，提高全集群信息查询、状态获取、日志检索、一键巡检、故障诊断几个使用场景中的效率，并为后续异常预警功能提供基础数据。
+By providing multi-dimensional cluster-level system tables and a cluster diagnosis rule framework, the solution improves cluster-wide info queries, state inspection, log search, one-click inspection, and fault diagnosis. It also provides a base for future anomaly alerting.
 
 ## Detailed Design
 
-### 系统整体概览
+### System Overview
 
-本提案的实现分为四层：
+The implementation has four layers:
 
-- L1: 最底层在各个节点实现信息采集模块，包括 TiDB/TiKV/PD 监控信息、硬件信息、内核中记录的网络 IO、磁盘 IO 信息、CPU 使用率、内存使用率等。
-- L2: 第二层通过调用底层信息采集模块并通过对外服务接口(HTTP API/gRPC Service)向上层提供数据，使 TiDB 可以获取当前节点采集到的信息。
-- L3: 第三层由 TiDB 拉取各个节点的信息进行聚合和汇总，并以系统表的形式对上层提供数据。
-- L4: 第四层实现诊断框架，诊断框架通过查询系统表获取整个集群的状态，并根据诊断规则得到诊断结果。
+- L1: On each node, implement data collection modules, including TiDB/TiKV/PD metrics, hardware info, OS network IO and disk IO, CPU usage, and memory usage.
+- L2: Call the collection modules and expose data through external service interfaces (HTTP API or gRPC service) so TiDB can fetch node data.
+- L3: TiDB pulls data from nodes, aggregates it, and exposes it through system tables.
+- L4: The diagnosis framework queries system tables to get cluster state and produces diagnosis results based on rules.
 
-如下从信息采集到使用使用诊断规则对采集的信息进行分析的数据流向图:
+Data flow from collection to diagnosis:
 
 ```
 +-L1--------------+             +-L3-----+
@@ -63,86 +63,86 @@
 +----------------------------------------+
 ```
 
-### 系统信息收集
+### System Information Collection
 
-TiDB/TiKV/PD 三个组件都需要实现系统信息采集模块，其中 TiDB/PD 使用 Golang 实现并复用逻辑，TiKV 需要使用 Rust 单独实现。
+All three components (TiDB, TiKV, PD) need system information collection modules. TiDB and PD share Go implementation, while TiKV uses Rust.
 
-#### 节点硬件信息
+#### Node Hardware Info
 
-各个节点需要获取的硬件信息包括：
+Each node should collect:
 
-- CPU 信息：物理核心数、逻辑核心数量、NUMA 信息、CPU 频率、CPU 供应商、L1/L2/L3 缓存大小
-- 网卡信息：网卡设备名、网卡是否启用、生产厂商、型号、带宽、驱动版本、接口队列数（可选）
-- 磁盘信息：磁盘名、磁盘容量、磁盘使用量、磁盘分区、挂载信息
-- USB 设备列表
-- 内存信息
+- CPU info: physical cores, logical cores, NUMA info, CPU frequency, CPU vendor, L1/L2/L3 cache sizes
+- Network interface info: device name, enabled or not, vendor, model, bandwidth, driver version, queue count (optional)
+- Disk info: disk name, capacity, usage, partitions, mounts
+- USB device list
+- Memory info
 
-#### 节点系统信息
+#### Node System Info
 
-各个节点需要获取的系统信息包括：
+Each node should collect:
 
-- CPU 使用率、1/5/15 分钟负载
-- 内存：Total/Free/Available/Buffers/Cached/Active/Inactive/Swap
-- 磁盘 IO：
-    - tps: 该设备每秒的传输次数
-    - rrqm/s: 每秒这个设备相关的读取请求有多少被 Merge
-    - wrqm/s: 每秒这个设备相关的写入请求有多少被 Merge
-    - r/s: 每秒从设备读取的数据量
-    - w/s: 每秒从设备写入的数据量
-    - rsec/s: 每秒读取的扇区数
-    - wsec/s: 每秒写取的扇区数
-    - avgrq-sz: 平均请求扇区的大小
-    - avgqu-sz: 是平均请求队列的长度
-    - await: 每一个IO请求的处理的平均时间（单位是微秒毫秒）
-    - svctm: 表示平均每次设备I/O操作的服务时间（以毫秒为单位）
-    - %util: 在统计时间内所有处理IO时间，除以总共统计时间
-- 网络 IO
-    - IFACE：LAN接口
-    - rxpck/s：每秒钟接收的数据包
-    - txpck/s：每秒钟发送的数据包
-    - rxbyt/s：每秒钟接收的字节数
-    - txbyt/s：每秒钟发送的字节数
-    - rxcmp/s：每秒钟接收的压缩数据包
-    - txcmp/s：每秒钟发送的压缩数据包
-    - rxmcst/s：每秒钟接收的多播数据包
-- 常用的系统配置：sysctl -a
+- CPU usage, 1/5/15 minute load
+- Memory: Total/Free/Available/Buffers/Cached/Active/Inactive/Swap
+- Disk IO:
+    - tps: transfers per second for the device
+    - rrqm/s: read requests merged per second
+    - wrqm/s: write requests merged per second
+    - r/s: reads per second
+    - w/s: writes per second
+    - rsec/s: sectors read per second
+    - wsec/s: sectors written per second
+    - avgrq-sz: average request size in sectors
+    - avgqu-sz: average request queue length
+    - await: average time per IO request (units depend on source)
+    - svctm: average service time per IO operation (ms)
+    - %util: fraction of time spent on IO during the interval
+- Network IO
+    - IFACE: LAN interface
+    - rxpck/s: packets received per second
+    - txpck/s: packets sent per second
+    - rxbyt/s: bytes received per second
+    - txbyt/s: bytes sent per second
+    - rxcmp/s: compressed packets received per second
+    - txcmp/s: compressed packets sent per second
+    - rxmcst/s: multicast packets received per second
+- Common system settings: sysctl -a
 
-#### 节点配置信息
+#### Node Configuration Info
 
-所有节点都包含当前节点的生效配置，不需要额外的步骤既可拿到配置信息。
+Each node has its effective runtime configuration. No extra steps are needed to collect it.
 
-#### 节点日志信息
+#### Node Log Info
 
-TiDB/TiKV/PD 产生的日志都保存在各自的节点上，并且 TiDB 集群部署过程中没有部署额外的日志收集组件，所以在日志检索中有以下问题：
+Logs from TiDB/TiKV/PD are stored on each node. Because the cluster does not deploy a separate log collection component, log search has the following issues:
 
-- 日志分布在各个节点，需要单独登陆到每一个节点使用关键字进行搜索
-- 日志文件会每天 rotate，所以在单个节点也需要对多个日志文件进行搜索
-- 没有简单的方式对多个节点的日志按照时间排序整合到同一个文件
+- Logs are distributed across nodes; users must log in to each node and search by keyword.
+- Logs rotate daily, so multiple files must be searched on a single node.
+- There is no easy way to merge logs from many nodes in time order.
 
-本提案提供以下两种思路来解决以上问题：
+This proposal considers two approaches:
 
-- 引入第三方日志收集组件对所有节点的日志进行收集
-    - 优势：统一的日志管理，日志可以长时间保存，并易于检索，并且多个组件的日志可以按照时间排序归并
-    - 劣势：增加集群运维难度，第三方组件不容易与 TiDB 内部 SQL 集成；日志收集工具会收集全量日志，收集过程占用各个系统资源（磁盘 IO、网络 IO）
-- 各个节点提供日志服务，TiDB 通过各个节点的接口将谓词下推到日志检索接口，直接对各个节点返回的日志进行归并
-    - 优势：不引入三方组件，谓词下推后只返回过滤后的日志，能轻易的与 TiDB SQL 进行集成，并能复用 SQL 引擎的过滤、聚合等
-    - 劣势：如果节点日志删除后，不能检索到对应日志
+- Introduce a third-party log collector to gather logs from all nodes.
+    - Pros: centralized log management; long retention; easy search; multi-component logs can be merged by time.
+    - Cons: higher operational complexity; hard to integrate with TiDB SQL; full-log collection consumes disk and network IO.
+- Each node provides a log service. TiDB pushes down predicates in log search SQL to the log service on each node and merges the filtered results.
+    - Pros: no third-party component; predicate pushdown returns only filtered logs; easy to integrate with TiDB SQL and reuse SQL engine filtering and aggregation.
+    - Cons: deleted node logs cannot be searched.
 
-根据以上的优劣势分析，本提案使用第二种方案，即各个节点提供日志搜索接口，TiDB 将日志搜索的 SQL 中谓词下推到各个节点，日志搜索接口的语义为：搜索本地日志文件，并使用谓词进行过滤，匹配的结果返回。
+Based on the analysis, this proposal chooses the second approach: each node provides a log search interface, and TiDB pushes down log predicates. The log search interface semantics: search local log files with predicates and return matching results.
 
-- `start_time`: 日志检索的开始时间（unix 时间戳，单位毫秒），如果没有该谓词，则默认为 0。
-- `end_time`: 日志检索的开始时间（unix 时间戳，单位毫秒），如果没有该谓词，则默认为 `int64::MAX`。
-- `pattern`: 如 SELECT * FROM cluster_log WHERE pattern LIKE "%gc%" 中的 %gc% 即为过滤的关键字
-- `level`: 日志等级，可以选为 DEBUG/INFO/WARN/WARNING/TRACE/CRITICAL/ERROR
-- `limit`: 返回日志的条数，如果没有指定，则限制为 64k 条，防止日质量太大占用大量网络
+- `start_time`: log search start time (unix timestamp in ms). If not provided, default is 0.
+- `end_time`: log search end time (unix timestamp in ms). If not provided, default is `int64::MAX`.
+- `pattern`: keyword filter, e.g. SELECT * FROM cluster_log WHERE pattern LIKE "%gc%".
+- `level`: log level: DEBUG/INFO/WARN/WARNING/TRACE/CRITICAL/ERROR.
+- `limit`: result count limit. If not provided, default to 64k to avoid large network transfers.
 
-#### 节点性能采样数据
+#### Node Performance Sampling Data
 
-当前 TiDB 集群中，发现有性能瓶颈时，需要快速定位问题。火焰图 （Flame Graph）是由 Brendan Gregg 发明的，与其他的 trace 和 profiling 方法不同的是，Flame Graph 以一个全局的视野来看待时间分布，它从底部往顶部，列出所有可能的调用栈。其他的呈现方法，一般只能列出单一的调用栈或者非层次化的时间分布。
+When a TiDB cluster has performance bottlenecks, users need fast diagnosis. Flame Graph, invented by Brendan Gregg, provides a global view of time distribution by listing all possible call stacks from bottom to top. Other formats only show a single stack or non-hierarchical time distribution.
 
-目前 TiKV 和 TiDB 获取火焰图的方式不同，并且都需要依赖外部工具。
+Today TiKV and TiDB use different approaches and both depend on external tools.
 
-- TiKV 获取火焰图
+- TiKV flame graph
 
     ```
     perf record -F 99 -p proc_pid -g -- sleep 60
@@ -151,62 +151,62 @@ TiDB/TiKV/PD 产生的日志都保存在各自的节点上，并且 TiDB 集群�
     /opt/FlameGraph/flamegraph.pl out.folded > cpu.svg
     ```
 
-- TiDB 获取火焰图
+- TiDB flame graph
 
     ```
     curl http://127.0.0.1:10080/debug/pprof/profile > cpu.pprof
     go tool pprof -svg cpu.svn cpu.pprof
     ```
 
-目前存在的两个主要问题：
+Two key problems:
 
-- 生产环境中不一定包含对应的外部工具（perf/flamegraph.pl/go）
-- TiKV 和 TiDB 没有统一的方式
+- Production environments may not include the external tools (perf/flamegraph.pl/go).
+- TiKV and TiDB do not share a unified method.
 
-为了解决以上两个问题，本提案将获取火焰图的方法内置到 TiDB 中，统一使用 SQL 触发采样并将采样数据转换为火焰图作为查询结果显示，一方面降低对外部工具的依赖，同时也极大的提升效率。各个节点实现采样数据采集功能并提供采样接口，对上层输出指定格式的采样数据。暂定输出为 `[pprof](github.com/google/pprof)` 定义的 ProtoBuf 格式。
+To solve this, the proposal integrates flame graph sampling into TiDB. SQL triggers sampling and returns the flame graph result, reducing external dependencies and improving efficiency. Each node collects sampling data and exposes it, with a unified output format. The output format is the ProtoBuf format defined by `pprof`.
 
-采样数据获取方式：
+Sampling data sources:
 
-- TiDB/PD: 使用 Golang Runtime 内置的采样数据获取接口
-- TiKV: 使用 `[pprof-rs](github.com/tikv/pprof-rs)` 库采集采样数据
+- TiDB/PD: use Go runtime built-in profiling APIs
+- TiKV: use the `pprof-rs` library
 
-#### 节点监控信息
+#### Node Monitoring Metrics
 
-监控信息主要是各个组件内部定义的监控指标。目前 TiDB/TiKV/PD 都会提供 `/metrics` HTTP API，然后通过部署的 Prometheus 组件定时（默认配置 15s）的拉取集群各个节点的监控指标。并且部署了 Grafana 组件用于从 Prometheus 拉取监控数据，进行可视化展示。
+Monitoring metrics are defined inside each component. TiDB/TiKV/PD provide a `/metrics` HTTP API, and Prometheus pulls metrics periodically (default 15s). Grafana visualizes the metrics.
 
-监控信息不同于实时获取的系统信息，监控数据是一个时序数据。包含各个节点在各个时间点的数据，对于排查问题和诊断问题有非常重要的用途，所以监控信息的保存和查询对于本提案实现 TiDB 内置 SQL 诊断非常重要。为了能够在 TiDB 内使用 SQL 查询监控数据，目前有以下备选方案：
+Metrics are time series data and are essential for diagnosis. To query metrics with SQL inside TiDB, there are two options:
 
-- 使用 Prometheus client 和 PromQL 查询 Prometheus server 的数据
-    - 优势：有现成解决方案，只需要将 Prometheus server 的地址注册到 TiDB 即可，实现简单
-    - 劣势：增强了 TiDB 对 Prometheus 的依赖，为后续完全移除 Prometheus 增加了困难
-- 将最近一段时间内（暂定 1 天）的监控数据保存到 PD，从 PD 中查询监控数据
-    - 优势：该方案不依赖 Prometheus server，为后续移除 Prometheus 组件有一定帮助
-    - 劣势：需要实现时序保存逻辑，并实现对应的查询引擎，实现难度和工作量大
+- Query Prometheus server with Prometheus client and PromQL.
+    - Pros: existing solution; only need to register Prometheus server address in TiDB.
+    - Cons: stronger dependency on Prometheus; harder to remove Prometheus later.
+- Store recent metrics (initially 1 day) in PD and query from PD.
+    - Pros: no dependency on Prometheus; helps future removal of Prometheus components.
+    - Cons: needs time series storage and query engine; high implementation cost.
 
-本提案倾向于方案二，虽然实现难度更大，但是对后续的工作有帮助。为了解决实现 PromQL 和时序数据保存的实现难度大和周期长的问题，将这个功能分为三个阶段实现（第三阶段视具体情况是否实现）：
+This proposal prefers option 2. To reduce scope, the feature is split into phases (phase 3 is optional):
 
-1. PD 中添加 `remote-metrics-storage` 配置，暂时配置为 Prometheus Server 的地址。PD 作为 proxy，将请求转移到 Prometheus 上执行，主要有以下考量：
-    - 后续 PD 实现查询接口实现自举，TiDB 不需要做其他改动
-    - 用户不使用 TiDB 部署的 Prometheus 而使用自建的监控服务，依然可以使用 SQL 查询监控信息以及诊断框架
-2. 将 Prometheus 时序数据保存和查询相应的模块抽离出来，并嵌入到 PD 中
-3. PD 内部实现自己的时序保存与查询（目前 CockroachDB 的方案）
+1. Add `remote-metrics-storage` in PD config. It initially points to Prometheus. PD acts as a proxy, forwarding queries to Prometheus. Considerations:
+    - PD can later implement its own query interface without changing TiDB.
+    - Users can use their own monitoring service and still query metrics and diagnostics via SQL.
+2. Extract Prometheus time series storage and query modules and embed them in PD.
+3. Implement native time series storage and query inside PD (similar to CockroachDB).
 
-##### PD 性能分析
+##### PD Performance Analysis
 
-PD 目前主要承载 TiDB 集群的调度和 TSO 服务，其中：
+PD mainly serves cluster scheduling and TSO:
 
-1. TSO 获取仅对 Leader 内存中的一个原子变量进行累加
-2. 调度生成的 Operator 和 OperatorStep 仅保存在内存中，根据 Region 的心跳信息更新内存中的状态
+1. TSO increments a single atomic variable in leader memory.
+2. Scheduling operators and steps are stored in memory and updated by region heartbeat.
 
-由以上信息可以得出在 PD 上新增监控功能对 PD 的性能影响在绝大部分情况下可以忽略不计。
+Therefore, in most cases the performance impact of adding monitoring on PD is negligible.
 
-### 系统信息获取
+### System Information Access
 
-由于 TiDB/TiKV/PD 组件之前已经可以通过 HTTP API 对外暴露部分系统信息，并且 PD 主要通过 HTTP API 对外提供服务，所以本提案的部分接口会复用已有逻辑，使用 HTTP API 从各个组件获取数据，比如配置信息获取。
+TiDB/TiKV/PD already expose some system information via HTTP API, and PD mainly provides services via HTTP. This proposal reuses existing logic and uses HTTP API for some data (such as configuration).
 
-由于 TiKV 后续计划完全移除 HTTP API，所以除了已有接口复用之外，不再额外添加新的 HTTP API，所有日志检索、硬件信息、系统信息获取统一定义 gRPC Service，各个组件实现对应的 Service 并在启动过程中注册到 gRPC Server 中。
+TiKV plans to remove HTTP API entirely. Except for reusing existing endpoints, no new HTTP APIs will be added. Log search, hardware info, and system info will be defined as gRPC services, implemented by each component and registered on startup.
 
-#### gRPC Service 定义
+#### gRPC Service Definition
 
 ```proto
 // Diagnostics service for TiDB cluster components.
@@ -269,33 +269,33 @@ message ServerInfoResponse {
 }
 ```
 
-#### 可复用的 HTTP API
+#### Reusable HTTP APIs
 
-目前 TiDB/TiKV/PD 包含部分可复用 HTTP API，本提案暂不将对应接口迁移至 gRPC Service，迁移工作由后续其他计划完成。所有 HTTP API 需要以 JSON 格式返回数据，以下是提案中可能用到的 HTTP API 列表：
+TiDB/TiKV/PD already provide some HTTP APIs. This proposal does not migrate them to gRPC yet; migration can be done later. All HTTP APIs return JSON. APIs that may be used include:
 
-- 获取配置信息
+- Get configuration
     - PD: /pd/api/v1/config
     - TiDB/TiKV: /config
-- 性能采样接口: TiDB/PD 包含以下所有接口，TiKV 暂时只包含 CPU 性能采样接口
+- Profiling APIs: TiDB/PD include all below; TiKV only provides CPU profiling initially
     - CPU: /debug/pprof/profile
     - Memory: /debug/pprof/heap
     - Allocs: /debug/pprof/allocs
     - Mutex: /debug/pprof/mutex
     - Block: /debug/pprof/block
 
-### 集群信息系统表
+### Cluster Information System Tables
 
-每个 TiDB 实例均可以通过前两层提供的 HTTP API 或 gRPC Service 访问其他节点的信息，从而实现集群的 Global View。本提案中通过新建一系列相关系统表将采集到的集群信息向上层提供数据，上层包括不限于：
+Each TiDB instance can access other nodes via HTTP APIs or gRPC services to build a cluster Global View. The proposal adds system tables to expose cluster information for:
 
-- 终端用户：用户直接通过 SQL 查询获取集群信息排查问题
-- 运维系统：TiDB 的使用环境比较多样，客户可以通过 SQL 获取集群信息将 TiDB 集成到自己的运维系统中
-- 生态工具：外部工具通过 SQL 拿到集群信息实现功能定制，比如 `[sqltop](https://github.com/ngaut/sqltop)` 可以直接通过集群 `statements_summary` 获取整个集群的 SQL 采样信息
+- End users: query cluster info with SQL to troubleshoot issues.
+- Ops systems: integrate TiDB into operational tooling across environments.
+- Ecosystem tools: use SQL to build features. For example, `sqltop` can read cluster `statements_summary` to get SQL samples for the whole cluster.
 
-#### 集群拓扑系统表
+#### Cluster Topology System Table
 
-要为 TiDB 实例提供一个 **Global View**，首先需要为 TiDB 实例提供一个拓扑系统表，可以从拓扑系统表中获取各个节点的 HTTP API Address 和 gRPC Service Address，从而方便的构造出各个远程 API 的 Endpoint，进一步获取目标节点采集的信息。
+To provide a Global View, TiDB needs a topology table with each node's HTTP API and gRPC service address. This makes it easy to build endpoints and fetch data.
 
-本提案实现完成可以通过 SQL 查询以下结果：
+Expected SQL result:
 
 ```
 mysql> use information_schema;
@@ -324,11 +324,11 @@ mysql> select TYPE, ADDRESS, STATUS_ADDRESS,VERSION from CLUSTER_INFO;
 3 rows in set (0.00 sec)
 ```
 
-#### 监控信息系统表
+#### Metrics System Tables
 
-由于监控指标会随着程序的迭代添加和删除监控指标，对于同一个监控指标，可能有不同的表达式获取监控不同维度的信息。鉴于以上两个需求，需要设计一个有弹性的监控系统表框架，本提案暂时才采取以下方案：将表达式映射为 `metrics_schema` 数据库中的系统表，表达式与系统表的关系可以通过以下方式关联：
+Metrics change over time and each metric can have multiple expressions for different dimensions. To provide a flexible system table framework, this proposal maps expressions to tables in the `metrics_schema` database. Expressions can be associated with tables in several ways:
 
-- 定义在配置文件
+- Define in config file
 
     ```
     # tidb.toml
@@ -338,20 +338,20 @@ mysql> select TYPE, ADDRESS, STATUS_ADDRESS,VERSION from CLUSTER_INFO;
     goroutines = `rate(go_gc_duration_seconds_sum{job="tidb"}[$STEP])`
     ```
 
-- HTTP API 注入
+- HTTP API injection
 
     ```
     curl -XPOST http://host:port/metrics_schema?name=distsql_duration&expr=`histogram_quantile(0.999, 
     sum(rate(tidb_distsql_handle_query_duration_seconds_bucket[$STEP])) by (le, type))`
     ```
 
-- 特殊 SQL 命令
+- Special SQL command
 
     ```
     mysql> admin metrics_schema add parse_duration `histogram_quantile(0.95, sum(rate(tidb_session_parse_duration_seconds_bucket[$STEP])) by (le, sql_type))`
     ```
 
-- 从文件中加载
+- Load from file
 
     ```
     mysql> admin metrics_schema load external_metrics.txt
@@ -360,7 +360,7 @@ mysql> select TYPE, ADDRESS, STATUS_ADDRESS,VERSION from CLUSTER_INFO;
     pd_client_cmd_ops = `sum(rate(pd_client_cmd_handle_cmds_duration_seconds_count{type!="tso"}[$STEP])) by (type)`
     ```
 
-添加以上表之后就可以在 `metrics_schema` 库中查看对应的表：
+After adding these tables, they appear in `metrics_schema`:
 
 ```
 mysql> use metrics_schema;
@@ -381,8 +381,7 @@ mysql> show tables;
 7 rows in set (0.00 sec)
 ```
 
-表达式映射到系统表时字段的确定方式主要取决与表达式执行结果的数据。以表达式 `sum(rate(pd_client_cmd_handle_cmds_duration_seconds_count{type!="tso"}[1m]offset 0)) by (type)` 为例，查询的结果为：
-
+The table schema depends on the PromQL result. Example expression: `sum(rate(pd_client_cmd_handle_cmds_duration_seconds_count{type!="tso"}[1m]offset 0)) by (type)` produces:
 
 | Element | Value |
 |---------|-------|
@@ -398,7 +397,7 @@ mysql> show tables;
 | {type="get_store"} | 0 |
 | {type="scatter_region"} | 0 |
 
-映射为表结构以及查询结果为：
+Mapped table schema and query results:
 
 ```
 mysql> desc pd_client_cmd_ops;
@@ -453,54 +452,53 @@ mysql> select address, type, value from pd_client_cmd_ops where start_time='2019
 11 rows in set (0.00 sec)
 ```
 
-对于多个 label 的 PromQL 就会有多个列的数据，可以方便的使用已有的 SQL 执行引擎对数据过滤、聚合得到期望的结果。
+For PromQL expressions with multiple labels, the table will contain multiple columns. Users can filter and aggregate with SQL to get the desired results.
 
-#### 节点性能剖析系统表
+#### Node Profiling System Tables
 
-通过各个节点的 `/debug/pprof/profile` 拿到对应节点性能采样数据，然后对采样数据进行聚合，最终使用 SQL 查询结果的方式向用户输出性能剖析结果。由于 SQL 查询结果不能以 svg 的格式输出，所以需要解决输出内容展示的问题。
+Fetch profiling data from each node via `/debug/pprof/profile`, aggregate it, and expose it through SQL. Because SQL cannot return SVG, we need a text output format.
 
-火焰图快速定位问题的核心点是：
+Key properties of flame graphs:
 
-- 提供全局视野
-- 展示全部调用路径
-- 层次化展示
+- Provide a global view
+- Show all call paths
+- Present a hierarchical structure
 
-本提案提出的解决方案聚焦在解决核心问题的点上，而未拘泥于是图形展示形式。最终的方案为：对采样数据进行聚合，并将所有的调用路径使用树形结构逐行进行展示。
+This proposal focuses on those properties rather than the graphical format. The final plan: aggregate samples and output all call paths in a tree, one line per path.
 
-解决方案是通过以下方式契合三个核心点：
+How the solution maps to the properties:
 
-- 提供全局视野：对每一个聚合结果使用单独的一列展示在全局的使用比例，可以方便过滤排序
-- 展示全部调用路径：将所有的调用路径都作为查询结果，并使用单独的列对各个调用路径的子树进行编号，可以方便的通过过滤只查看某一个子树
-- 层次化展示：使用树形结构展示堆栈，使用单独的列记录栈的深度，可以方便的对不同栈的深度进行过滤
+- Global view: show each aggregated result in a separate column for easy filtering and sorting.
+- All call paths: output all paths and label each subtree so users can filter a subtree.
+- Hierarchical structure: display stacks as a tree and record stack depth in a separate column.
 
-本提案需要实现以下性能剖析表：
+Profiling tables to implement:
 
-
-| 表名 | 描述 |
+| Table | Description |
 |------|-----|
-| tidb_profile_cpu | TiDB CPU 火焰图 |
-| tikv_profile_cpu | TiKV CPU 火焰图 |
-| tidb_profile_block | TiDB 阻塞情况火焰图 |
-| tidb_profile_memory | TiDB 内存对象火焰图 |
-| tidb_profile_allocs | 内存分配火焰图 |
-| tidb_profile_mutex | 锁的争用情况火焰图 |
-| tidb_profile_goroutines | 系统中已有的 goroutines，排查 goroutine 泄漏、阻塞 |
+| tidb_profile_cpu | TiDB CPU flame graph |
+| tikv_profile_cpu | TiKV CPU flame graph |
+| tidb_profile_block | TiDB blocking flame graph |
+| tidb_profile_memory | TiDB memory object flame graph |
+| tidb_profile_allocs | memory allocation flame graph |
+| tidb_profile_mutex | lock contention flame graph |
+| tidb_profile_goroutines | goroutines in the system; used to find leaks or blocking |
 
-#### 内存表全局化
+#### Global Memory Tables
 
-目前 `slow_query`/`statements_summary`/`processlist` 只包含单节点数据，本提案通过添加以下三张集群级别系统表使任何一个 TiDB 实例可以查看整个集群的信息：
+`slow_query`/`statements_summary`/`processlist` currently contain only single-node data. This proposal adds cluster-level tables so any TiDB instance can view the entire cluster:
 
-| 表名 | 描述 |
+| Table | Description |
 |------|-----|
-| cluster_slow_query | 所有 TiDB 节点的 slow_query 表数据 |
-| cluster_statements_summary | 所有 TiDB 节点的 statements summary 表数据 |
-| cluster_processlist | 所有 TiDB 节点的 processlist 表数据 |
+| cluster_slow_query | slow_query from all TiDB nodes |
+| cluster_statements_summary | statements_summary from all TiDB nodes |
+| cluster_processlist | processlist from all TiDB nodes |
 
-#### 所有节点的配置信息
+#### Configuration for All Nodes
 
-对于一个大集群，通过 HTTP API 去每一个节点获取配置的方式较为繁琐和低效，本提案提供全集群配置信息系统表，简化整个集群配置信息的获取、过滤、聚合。
+For a large cluster, fetching config from each node via HTTP API is inefficient. This proposal provides a cluster-level config table for easier filtering and aggregation.
 
-如下示例是实现本提案后的预期结果：
+Expected output:
 
 ```
 mysql> use information_schema;
@@ -559,9 +557,9 @@ mysql> select * from cluster_config where type='tikv' and `key` like 'raftdb.wal
 5 rows in set (0.01 sec)
 ```
 
-#### 节点硬件/系统/负载信息系统表
+#### Node Hardware/System/Load Tables
 
-根据 `gRPC Service` 的协议定义，每一个 `ServerInfoItem` 包含信息的名字以及对应的键值对，在向用户展示时，需要添加节点的类型以及节点地址。
+Based on the gRPC service, each `ServerInfoItem` has a name and key-value pairs. When presenting to users, add node type and node address.
 
 ```
 mysql> use information_schema;
@@ -604,11 +602,11 @@ mysql> select * from cluster_load
 100 rows in set (0.01 sec)
 ```
 
-#### 全链路日志系统表
+#### Cluster Log Table
 
-当前日志搜索需要登陆多台机器分别进行检索，并且没有简单的办法对多个机器的检索结果按照时间全排序。本提案新建一个 `cluster_log` 系统表用于提供全链路日志，简化通过日志排查问题的方式以及提高效率。实现方式为：通过 gRPC Diagnosis Service 的 `search_log` 接口，将日志过滤的谓词下推到各个节点，并最终按照时间进行归并。
+Today log search requires logging into multiple machines and there is no easy way to merge results by time. This proposal adds a `cluster_log` table for end-to-end log search. Implementation: use the gRPC Diagnostics Service `search_log` API, push down predicates to each node, then merge results by time.
 
-如下示例是实现本提案后的预期结果：
+Expected output:
 
 ```
 mysql> use information_schema;
@@ -626,7 +624,7 @@ mysql> desc cluster_log;
 +---------+-------------+------+------+---------+-------+
 5 rows in set (0.00 sec)
 
-mysql> select * from cluster_log where content like '%412134239937495042%'; -- 查询 TSO 为 412134239937495042 全链路日志
+mysql> select * from cluster_log where content like '%412134239937495042%'; -- query end-to-end logs for TSO 412134239937495042
 +------+--------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | TYPE | ADDRESS                | LEVEL | CONTENT                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 +------+------------------------+-------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -665,46 +663,46 @@ mysql> select * from cluster_log where content like '%412134239937495042%'; -- �
 +------+--------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 31 rows in set (0.01 sec) 
 
-mysql> select * from cluster_log where type='pd' and content like '%scheduler%'; -- 查询 PD 的调度日志
+mysql> select * from cluster_log where type='pd' and content like '%scheduler%'; -- query PD scheduling logs
 
-mysql> select * from cluster_log where type='tidb' and content like '%ddl%'; -- 查询 TiDB 的 DDL 日志
+mysql> select * from cluster_log where type='tidb' and content like '%ddl%'; -- query TiDB DDL logs
 ```
 
-### 集群诊断
+### Cluster Diagnosis
 
-在当前的集群拓扑下，各个组件分散，数据源和数据格式异构，不便于通过程序化的手段进行集群诊断，所以需要人工进行问题诊断。通过前面几层提供的数据系统表，每一个 TiDB 节点都有了一个稳定的全集群 Global View，所以可以在这个基础上实现一个问题诊断框架。通过定义诊断规则能够快速发现集群的已有问题和潜在问题。
+In current cluster topology, components are distributed and data sources and formats are heterogeneous. Programmatic diagnosis is hard, so humans diagnose issues manually. With the system tables from earlier layers, each TiDB node has a stable cluster Global View. On top of that, a diagnosis framework can detect existing and potential issues by applying diagnosis rules.
 
-**诊断规则定义**：诊断规则是通过读入各个系统表的数据，并通过检测异常数据发现问题的逻辑。
+**Diagnosis rule definition**: a rule reads data from system tables and detects anomalies to find issues.
 
-诊断规则可以分为三个层次：
+Rules fall into three levels:
 
-- 发现潜在问题：比如通过判断磁盘容量和磁盘使用量的比例发现磁盘容量不足
-- 发现已有问题：比如通过查看负载情况，发现 Coprocessor 的线程池已经跑满
-- 给出修复建议：比如通过分析磁盘 IO 发现延迟过高，可以给出更换磁盘的建议
+- Find potential issues: for example, detect low disk capacity by comparing disk capacity vs usage.
+- Find existing issues: for example, detect saturated Coprocessor thread pools by inspecting load.
+- Provide remediation suggestions: for example, recommend disk replacement if IO latency is high.
 
-本提案主要负责实现诊断框架和部分诊断规则，更多的诊断规则需要根据使用经验逐步沉淀，最终形成一个专家系统，降低使用门槛和运维难度。后续内容不详细探讨具体某条的诊断规则，主要聚焦诊断框架的实现。
+This proposal focuses on the diagnosis framework and a subset of rules. More rules should be added over time to form an expert system and reduce operational effort. This document does not cover each specific rule and focuses on the framework.
 
-#### 诊断框架设计
+#### Diagnosis Framework Design
 
-诊断框架的设计需要考虑多种用户使用场景，包括不限于：
+The framework must handle multiple user scenarios, including:
 
-- 用户选择固定版本后，不会轻易升级 TiDB 集群版本
-- 用户自定义诊断规则
-- 不重启集群加载新的诊断规则
-- 诊断框架需要能方便的与已有运维系统集成
-- 用户可能会屏蔽部分诊断，比如用户预期是一个异构系统，那么会屏蔽异构诊断规则
+- Users stay on a fixed TiDB version and do not upgrade frequently.
+- Users define custom diagnosis rules.
+- Rules can be loaded without restarting the cluster.
+- The framework can integrate with existing operations systems.
+- Users may disable some diagnosis, for example when the system is heterogeneous.
 - ...
 
-需要实现一个支持规则热加载的诊断系统，目前有以下备选方案：
+We need a diagnosis system with hot-loadable rules. Candidate approaches:
 
-- Golang Plugin：使用不同的插件来定义诊断规则，并且加载到 TiDB 的进程中
-    - 优势：使用 Golang 开发，开发门槛低
-    - 劣势：版本管理容易出错，需要和宿主 TiDB 使用同样的版本编译插件
-- 内嵌 Lua：在运行时或启动过程中加载 Lua 脚本，脚本从 TiDB 读取系统表数据，并根据诊断规则判断并反馈结果
-    - 优势：Lua 是一个完全依赖宿主的语言，语法简单，容易与宿主集成
-    - 劣势：依赖另一个脚本语言
-- Shell Script：Shell 具备流程控制功能，所以可以用 Shell 定义诊断规则
-    - 优势：易于编写、加载和执行，对 TiDB 内部无侵入，只需要外部 Shell 执行对应 SQL 即可
-    - 劣势：需要在安装 mysql client 的机器上运行
+- Golang plugin: define rules as plugins and load them into TiDB.
+    - Pros: Go is easy to use and has low learning curve.
+    - Cons: version management is error-prone; plugins must be built with the same version as TiDB.
+- Embedded Lua: load Lua scripts at runtime or startup. Scripts read system tables and apply rules.
+    - Pros: simple syntax; easy integration.
+    - Cons: introduces another scripting language.
+- Shell script: use shell scripts to define rules and run SQL.
+    - Pros: easy to write, load, and execute; no TiDB intrusion; only requires a MySQL client to run SQL.
+    - Cons: requires a host with a MySQL client installed.
 
-本提案暂时采用第三种方案，使用 Shell 编写诊断规则。对 TiDB 没有侵入，同时也为后续实现更好的方案提供扩展性。
+This proposal chooses the third option for now: implement rules as shell scripts. It keeps TiDB untouched and leaves room for better options in the future.

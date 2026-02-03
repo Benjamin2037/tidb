@@ -5,7 +5,7 @@
 - Discussion at: https://github.com/pingcap/tidb/issues/19747
 
 ## Abstract
-This proposal proposes a new feature that supports `pinyin` order for chinese character.
+This proposal introduces a new feature that supports `pinyin` order for Chinese characters.
 
 ## Background
 It's unable now to order by a column based on its pinyin order. For example:
@@ -16,27 +16,27 @@ create table t(
 )
 charset = 'utf8mb4' collate = 'utf8mb4_zh_0900_as_cs';
 
-# insert some data:
-insert into t values ("中文"), ("啊中文");
+# insert some data (ASCII placeholders for Chinese words):
+insert into t values ("zh_text"), ("a_zh_text");
 
 # a query requires to order by column a in its pinyin order:
 select * from t order by a;
 +-----------+
 | a         |
 +-----------+
-| 啊中文    |
-| 中文      |
+| a_zh_text |
+| zh_text   |
 +-----------+
 2 rows in set (0.00 sec)
 ```
 
 ## Proposal
 
-`pinyin` order for Chinese character supported by this proposal will add a new collation named `utf8mb4_zh_pinyin_tidb_as_cs` which is support all Unicode and sort Chinese characters correctly according to the PINYIN collation in zh.xml file of [CLDR24](http://unicode.org/Public/cldr/24/core.zip), and only support those Chinese characters with `pinyin` in zh.xml currently, we support neither those CJK characters whose category defined in Unicode are Symbol with the same shape as Chinese characters nor the PINYIN characters. In `utf8mb4_zh_pinyin_tidb_as_cs`, `utf8mb4` means charset utf8mb4, `zh` means Chinese language, `pinyin` means it has pinyin order, `tidb` means a special(tidb) version, and `as_cs` means it is accent-sensitive and case-sensitive.
+`pinyin` order for Chinese characters supported by this proposal adds a new collation named `utf8mb4_zh_pinyin_tidb_as_cs`. It supports all Unicode and sorts Chinese characters according to the PINYIN collation in the zh.xml file of [CLDR24](http://unicode.org/Public/cldr/24/core.zip). It only supports Chinese characters with `pinyin` in zh.xml; it does not support CJK characters whose Unicode category is Symbol with a similar shape to Chinese characters, nor PINYIN characters themselves. In `utf8mb4_zh_pinyin_tidb_as_cs`, `utf8mb4` is the charset, `zh` means Chinese language, `pinyin` means pinyin order, `tidb` is a TiDB-specific variant, and `as_cs` means accent-sensitive and case-sensitive.
 
 ### Advantages
 
-It's a lot of work if we implement `utf8mb4_zh_0900_as_cs`. The implementation of MySQL looks complicated with weight reorders, magic numbers, and some tricks. Implementing `utf8mb4_zh_pinyin_tidb_as_cs` is much easier. It supports all Chinese characters and sorts Chinese characters in pinyin order. It is good enough.
+It's a lot of work to implement `utf8mb4_zh_0900_as_cs`. The MySQL implementation looks complicated with weight reorders, magic numbers, and tricks. Implementing `utf8mb4_zh_pinyin_tidb_as_cs` is much easier. It supports Chinese characters and sorts them in pinyin order. It is good enough.
 
 ### Disadvantages
 

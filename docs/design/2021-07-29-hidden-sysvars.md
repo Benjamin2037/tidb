@@ -48,7 +48,7 @@ There are currently ~20 hidden system variables:
 | tidb_enable_global_temporary_table | Global temporary table | #1 Stable |
 | tidb_enable_stable_result_mode | Make resultset sorted(deterministic order) by default | #1 Stable |
 | tidb_track_aggregate_memory_usage | Track memory usage of aggregate executor | #1 Stable |
-| tidb_enable_top_sql | Top SQL (Sprint3) 总设计文档  | #2 Experimental |
+| tidb_enable_top_sql | Top SQL (Sprint3) overall design doc | #2 Experimental |
 | tidb_top_sql_agent_address | Parameters for Top SQL | #4 Non-boolean Experimental |
 | tidb_top_sql_max_time_series_count | "" | #4 Non-boolean Experimental |
 | tidb_top_sql_max_meta_count | "" | #4 Non-boolean Experimental |

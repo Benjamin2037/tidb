@@ -29,7 +29,7 @@ So you can simply think that each TiDB server needs two modules to ensure that t
 * The other one is the handle DDL job module. This module is executed only after the current TiDB server is elected to the owner. Process the job and change the schema. After the owner writes the currently changed schema state to TiKV, we can assume that all TiDB servers in the cluster that can handle SQL after waiting for 2*lease have been updated to this schema.
 ![Figure 1: Structure flow chart](./imgs/structure-flow-chart.png)
 
-<font size=1 face="黑体"><center>Figure 1: Structure flow chart</center></font>
+<font size=1 face="sans-serif"><center>Figure 1: Structure flow chart</center></font>
 #### Initial configuration
 The TiDB server which starts first establishes the latest version of information path in PD, which contains the latest schema version number.
 All TiDB servers need to do the following when starting up:
@@ -57,7 +57,7 @@ Currently, only the add index operation in TiDB takes a long time to execute, so
 
 ![Figure 2: Owner detail flow chart](./imgs/owner-detail-flow-chart.png)
 
-<font size=1 face="黑体"><center>Figure 2: Owner detailed flow chart</center></font>
+<font size=1 face="sans-serif"><center>Figure 2: Owner detailed flow chart</center></font>
 ## Optimization function
 ### General DDL operation
 #### Add column operation

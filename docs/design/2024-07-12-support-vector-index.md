@@ -121,7 +121,7 @@ The analyze statement is not supported at the moment.
 | :---- | :---- | :---- | :---- |
 | VEC\_L1\_DISTANCE |  |  | TBD |
 | VEC\_L2\_DISTANCE | v |  |  |
-| VEC\_NEGATIVE\_INNER\_PRODUCT（名字待定） VEC\_NEGATIVE\_INNER\_PRODUCT (name to be determined) |  | v |  |
+| VEC\_NEGATIVE\_INNER\_PRODUCT (name TBD) |  | v |  |
 | VEC\_COSINE\_DISTANCE | v |  |  |
 
 * Incompatibility with other features(This operation is not supported in the first phase of this design, but it can be considered for support in the future).

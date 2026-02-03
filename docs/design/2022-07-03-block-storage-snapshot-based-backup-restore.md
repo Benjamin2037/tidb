@@ -1078,5 +1078,5 @@ All block issues had been identified. However some part of design may need some 
 **Reference**
 
 
-1. [TiKV 源码分析](https://pingcap.com/zh/blog/?tag=TiKV%20%26%2328304%3B%26%2330721%3B%26%2335299%3B%26%2326512%3B)
+1. [TiKV source code analysis](https://pingcap.com/zh/blog/?tag=TiKV%20%26%2328304%3B%26%2330721%3B%26%2335299%3B%26%2326512%3B)
 2. [AWS EBS ](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/AmazonEBS.html)
