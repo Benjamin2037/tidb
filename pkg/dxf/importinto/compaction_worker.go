@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/meta/model"
 	"github.com/pingcap/tidb/pkg/metrics"
+	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tidb/pkg/sessionctx"
 	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
 	"github.com/pingcap/tidb/pkg/table"
@@ -95,6 +96,9 @@ type tableCompactionState struct {
 }
 
 func runImportIntoCompactionOnce(do *domain.Domain, logger *zap.Logger) error {
+	if isSLOGuardPaused() {
+		return nil
+	}
 	retentionDays := int(vardef.ImportIntoBaseRetentionDays.Load())
 	if retentionDays <= 0 {
 		return nil
@@ -208,7 +212,7 @@ func resolveTableInfo(is infoschema.InfoSchema, state *tableCompactionState) (ta
 	if !ok {
 		return nil, nil, false
 	}
-	dbInfo, ok := is.SchemaByName(model.NewCIStr(state.schemaName))
+	dbInfo, ok := is.SchemaByName(ast.NewCIStr(state.schemaName))
 	if !ok {
 		return nil, nil, false
 	}
@@ -264,7 +268,9 @@ func fillBaseVersion(ctx context.Context, base *baseVersion) error {
 	base.manifestPath = manifestPath
 	base.createTime = manifest.CreateTime
 	if base.createTime.IsZero() && base.job != nil && !base.job.CreateTime.IsZero() {
-		base.createTime = base.job.CreateTime.GoTime(time.UTC)
+		if ct, err := base.job.CreateTime.GoTime(time.UTC); err == nil {
+			base.createTime = ct
+		}
 	}
 	return nil
 }

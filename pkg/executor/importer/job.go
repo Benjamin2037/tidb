@@ -73,6 +73,8 @@ const (
 	// it's used in global sort.
 	JobStepResolvingConflicts = "resolving-conflicts"
 	JobStepValidating         = "validating"
+	// JobStepCompacting marks a background base compaction job.
+	JobStepCompacting = "compacting"
 
 	baseQuerySQL = `SELECT
 					id, create_time, start_time, update_time, end_time,
@@ -277,6 +279,25 @@ func FinishJob(ctx context.Context, conn sqlexec.SQLExecutor, jobID int64, summa
 		SET update_time = CURRENT_TIMESTAMP(6), end_time = CURRENT_TIMESTAMP(6), status = %?, step = %?, summary = %?
 		WHERE id = %? AND status = %?;`,
 		JobStatusFinished, jobStepNone, summaryStr, jobID, JobStatusRunning)
+	return err
+}
+
+// UpdateJobSummary updates job summary without changing status or step.
+func UpdateJobSummary(ctx context.Context, conn sqlexec.SQLExecutor, jobID int64, summary *Summary) error {
+	summaryStr := "{}"
+	if summary != nil {
+		bytes, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		summaryStr = string(bytes)
+	}
+
+	ctx = util.WithInternalSourceType(ctx, kv.InternalImportInto)
+	_, err := conn.ExecuteInternal(ctx, `UPDATE mysql.tidb_import_jobs
+		SET update_time = CURRENT_TIMESTAMP(6), summary = %?
+		WHERE id = %?;`,
+		summaryStr, jobID)
 	return err
 }
 
