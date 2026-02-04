@@ -20,11 +20,11 @@
 
 ## Introduction
 
-This document proposes incremental upsert on top of TiDB IMPORT INTO + DXF + Lightning global sort and ingest. The solution imports TSV or CSV from object storage, maintains a base version manifest on S3, merges base and delta by region, and automatically ingests only changed regions for delta imports. It also provides SHOW IMPORT METERING and SHOW IMPORT COST for auditing resource usage and cost.
+This document proposes incremental upsert on top of TiDB IMPORT INTO + DXF + global sort and ingest. The solution imports CSV from object storage, maintains a base version manifest on S3, merges base and delta by region, and automatically ingests only changed regions for delta imports. It also provides SHOW IMPORT METERING and SHOW IMPORT COST for auditing resource usage and cost.
 
 ## Motivation or Background
 
-The primary workload is a wide table (including JSON columns) with a composite primary key (user ID + device ID). Daily delta data from multiple systems updates only a subset of columns. Requirements:
+The primary workload is a wide table (including JSON columns) with a cluster primary key. Daily delta data from multiple systems updates only a subset of columns. Requirements:
 
 - Eventual consistency is acceptable, batch import is allowed.
 - Delta import must upsert against the previous day base (sparse column updates).
@@ -96,14 +96,75 @@ If SLO guard is disabled, Apply runs immediately without time windows or manual 
 
 ### SLO Guard (dynamic slow or pause by p99)
 
+This section merges the SLO guard statement design and execution details into the main IMPORT INTO upsert design.
+
+#### Goals and constraints
+- Provide a minimal, extensible, auditable control surface to protect read p99.
+- Apply runs immediately by default; it is slowed or paused only by SLO guard.
+- No apply_mode / apply_window / apply_rate_limit; no auto-tuning or multi-metric configuration.
+
+#### SQL statements
+```
+ALTER IMPORT SLO GUARD [JOB <id>] WITH
+  config='{"enable":true,"pause_threshold":"10ms","slow_apply_rate_limit_mb_per_sec":64}'
+
+SHOW IMPORT SLO GUARD [JOB <id>]
+```
+- If JOB <id> is omitted, the scope is global (job_id=0).
+- enable=false disables the scope (global or job).
+- SHOW ... JOB <id> returns the effective config (job preferred, fallback to global).
+- SHOW without JOB returns visible configs (SUPER can see the global row).
+
+#### Config model (JSON)
+- enable: boolean, default false.
+- pause_threshold: duration string, must be > 0 (example: 10ms).
+- slow_apply_rate_limit_mb_per_sec: integer, must be >= 0.
+- Unknown fields are stored but ignored (reserved for future extension).
+
+Defaults (when no config row exists):
+- enable=false
+- pause_threshold=10ms
+- slow_apply_rate_limit_mb_per_sec=64
+
+#### System table and migration
+Table: mysql.tidb_import_slo_guard
+
+Required fields:
+- job_id bigint primary key
+- config JSON (or equivalent raw JSON field)
+
+Compatibility fields (optional during transition):
+- enable tinyint(1)
+- pause_threshold varchar(32)
+- slow_apply_rate_limit_mb_per_sec bigint
+
+Migration strategy:
+- During upgrade: if legacy fields exist and config is empty, build JSON and write to config.
+- During read: prefer config; if config is empty, fallback to legacy fields and generate default JSON.
+
+#### Privilege model
+- Job-level config: IMPORT INTO job owner or SUPER.
+- Global config (job_id=0): SUPER only.
+
+#### Runtime behavior
 - Background SLO guard worker queries metrics_schema.tidb_query_duration with sql_type=Select p99 (5m window, 30s interval).
+- Threshold derivation:
+  - slow = 0.8 * pause_threshold
+  - resume = 0.6 * pause_threshold
 - State machine:
-  - p99 >= slow (0.8 * pause_threshold) -> slow state (Apply rate limit override)
-  - p99 >= pause_threshold -> PauseTask to pause import and preheat
-  - p99 <= resume (0.6 * pause_threshold) -> ResumeTask
-- Config via ALTER IMPORT SLO GUARD [JOB <id>] WITH config='{"enable":true,"pause_threshold":"10ms","slow_apply_rate_limit_mb_per_sec":64}'.
+  - p99 >= slow -> slow state (Apply rate limit override)
+  - p99 >= pause_threshold -> pause (PauseTask for tagged tasks)
+  - p99 <= resume -> normal (ResumeTask)
+- Actions:
+  - slow or pause: Apply rate limit is min(baseLimit, slow_apply_rate_limit_mb_per_sec)
+  - pause: PauseTask only for tasks tagged by SLO guard
+  - resume: Resume tasks paused by SLO guard
 - Precedence: job-level config first, fallback to global job_id=0.
-- If JOB <id> omitted, global config (job_id=0). enable=false disables global guard.
+- Global enable=false disables any job that is not explicitly enabled.
+
+#### Edge cases and fallbacks
+- No metric data: skip this iteration.
+- No config: use defaults (enable=false).
 
 ### Preheat Call Path
 
