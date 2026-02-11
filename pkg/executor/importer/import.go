@@ -124,6 +124,11 @@ const (
 	disableTiKVImportModeOption = "disable_tikv_import_mode"
 	cloudStorageURIOption       = ast.CloudStorageURI
 	disablePrecheckOption       = "disable_precheck"
+	fullOption                  = "full"
+	deltaOption                 = "delta"
+	baseVersionOption           = "base_version"
+	baseURIOption               = "base_uri"
+	mergeStrategyOption         = "merge_strategy"
 	// used for test
 	maxEngineSizeOption  = "__max_engine_size"
 	forceMergeStep       = "__force_merge_step"
@@ -155,6 +160,11 @@ var (
 		manualRecoveryOption:        false,
 		cloudStorageURIOption:       true,
 		disablePrecheckOption:       false,
+		fullOption:                  false,
+		deltaOption:                 false,
+		baseVersionOption:           true,
+		baseURIOption:               true,
+		mergeStrategyOption:         true,
 	}
 
 	csvOnlyOptions = map[string]struct{}{
@@ -294,6 +304,10 @@ type Plan struct {
 	CloudStorageURI       string
 	DisablePrecheck       bool
 	GroupKey              string
+	UpsertMode            UpsertMode
+	BaseVersion           string
+	BaseURI               string
+	MergeStrategy         MergeStrategy
 
 	// used for checksum in physical mode
 	DistSQLScanConcurrency int
@@ -702,6 +716,19 @@ func (p *Plan) initOptions(ctx context.Context, seCtx sessionctx.Context, option
 	}
 	p.specifiedOptions = specifiedOptions
 
+	var hasUpsertMode bool
+	if _, ok := specifiedOptions[fullOption]; ok {
+		p.UpsertMode = UpsertModeFull
+		hasUpsertMode = true
+	}
+	if _, ok := specifiedOptions[deltaOption]; ok {
+		if hasUpsertMode {
+			return exeerrors.ErrLoadDataUnsupportedOption.FastGenByArgs(deltaOption, "cannot be used with full")
+		}
+		p.UpsertMode = UpsertModeDelta
+		hasUpsertMode = true
+	}
+
 	if kerneltype.IsNextGen() && sem.IsEnabled() {
 		if p.DataSourceType == DataSourceTypeQuery {
 			return plannererrors.ErrNotSupportedWithSem.GenWithStackByArgs("IMPORT INTO from select")
@@ -862,6 +889,32 @@ func (p *Plan) initOptions(ctx context.Context, seCtx sessionctx.Context, option
 		}
 		p.GroupKey = v
 	}
+	if opt, ok := specifiedOptions[baseVersionOption]; ok {
+		v, err := optAsString(opt)
+		if err != nil || v == "" {
+			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(opt.Name)
+		}
+		p.BaseVersion = v
+	}
+	if opt, ok := specifiedOptions[baseURIOption]; ok {
+		v, err := optAsString(opt)
+		if err != nil || v == "" {
+			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(opt.Name)
+		}
+		p.BaseURI = v
+	}
+	if opt, ok := specifiedOptions[mergeStrategyOption]; ok {
+		v, err := optAsString(opt)
+		if err != nil || v == "" {
+			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(opt.Name)
+		}
+		switch normalizeMergeStrategy(v) {
+		case MergeStrategyLastWriteWins, MergeStrategyMaxTS:
+			p.MergeStrategy = normalizeMergeStrategy(v)
+		default:
+			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(opt.Name)
+		}
+	}
 	if opt, ok := specifiedOptions[recordErrorsOption]; ok {
 		vInt, err := optAsInt64(opt)
 		if err != nil || vInt < -1 {
@@ -933,6 +986,23 @@ func (p *Plan) initOptions(ctx context.Context, seCtx sessionctx.Context, option
 
 	if p.SplitFile && len(p.LinesTerminatedBy) == 0 {
 		return exeerrors.ErrInvalidOptionVal.FastGenByArgs("lines_terminated_by, should not be empty when use split_file")
+	}
+
+	if p.IsUpsert() {
+		if p.IsLocalSort() {
+			return exeerrors.ErrLoadDataUnsupportedOption.FastGenByArgs(p.UpsertMode, "require cloud storage global sort")
+		}
+		if p.BaseURI == "" {
+			p.BaseURI = p.CloudStorageURI
+		}
+		if p.IsUpsertDelta() && p.BaseVersion == "" {
+			return exeerrors.ErrInvalidOptionVal.FastGenByArgs(baseVersionOption)
+		}
+		if p.MergeStrategy == "" {
+			p.MergeStrategy = MergeStrategyLastWriteWins
+		}
+	} else if p.BaseVersion != "" || p.BaseURI != "" || p.MergeStrategy != "" {
+		return exeerrors.ErrLoadDataUnsupportedOption.FastGenByArgs("base_version/base_uri/merge_strategy", "require full or delta")
 	}
 
 	p.adjustOptions(targetNodeCPUCnt)
@@ -1717,6 +1787,21 @@ func (p *Plan) IsLocalSort() bool {
 // IsGlobalSort returns true if we sort data on global storage.
 func (p *Plan) IsGlobalSort() bool {
 	return !p.IsLocalSort()
+}
+
+// IsUpsert returns true if the plan runs in full/delta upsert mode.
+func (p *Plan) IsUpsert() bool {
+	return p.UpsertMode != UpsertModeNone
+}
+
+// IsUpsertDelta returns true if the plan runs in delta upsert mode.
+func (p *Plan) IsUpsertDelta() bool {
+	return p.UpsertMode == UpsertModeDelta
+}
+
+// IsUpsertFull returns true if the plan runs in full upsert mode.
+func (p *Plan) IsUpsertFull() bool {
+	return p.UpsertMode == UpsertModeFull
 }
 
 // non CSV format should not specify CSV only options, we check it again if the
