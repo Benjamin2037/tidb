@@ -139,6 +139,7 @@ type importScheduler struct {
 	*scheduler.BaseScheduler
 
 	GlobalSort bool
+	UpsertMode importer.UpsertMode
 	mu         sync.RWMutex
 	// NOTE: there's no need to sync for below 2 fields actually, since we add a restriction that only one
 	// task can be running at a time. but we might support task queuing in the future, leave it for now.
@@ -199,6 +200,7 @@ func (sch *importScheduler) Init() (err error) {
 	}
 
 	sch.GlobalSort = taskMeta.Plan.CloudStorageURI != ""
+	sch.UpsertMode = taskMeta.Plan.UpsertMode
 	sch.BaseScheduler.Extension = sch
 	return sch.BaseScheduler.Init()
 }
@@ -219,7 +221,9 @@ func (sch *importScheduler) OnTick(ctx context.Context, task *proto.Task) {
 }
 
 func (*importScheduler) isImporting2TiKV(task *proto.Task) bool {
-	return task.Step == proto.ImportStepImport || task.Step == proto.ImportStepWriteAndIngest
+	return task.Step == proto.ImportStepImport ||
+		task.Step == proto.ImportStepWriteAndIngest ||
+		task.Step == proto.ImportStepIngestChangedRegions
 }
 
 func (sch *importScheduler) switchTiKVMode(ctx context.Context, task *proto.Task) {
@@ -301,7 +305,7 @@ func (sch *importScheduler) OnNextSubtasksBatch(
 
 	previousSubtaskMetas := make(map[proto.Step][][]byte, 1)
 	switch nextStep {
-	case proto.ImportStepImport, proto.ImportStepEncodeAndSort:
+	case proto.ImportStepImport, proto.ImportStepEncodeAndSort, proto.ImportStepDeltaEncodeAndSort:
 		if metrics, ok := metric.GetCommonMetric(ctx); ok {
 			metrics.BytesCounter.WithLabelValues(metric.StateTotalRestore).Add(float64(taskMeta.Plan.TotalFileSize))
 		}
@@ -359,6 +363,22 @@ func (sch *importScheduler) OnNextSubtasksBatch(
 		if err = sch.job2Step(ctx, logger, taskMeta, importer.JobStepResolvingConflicts); err != nil {
 			return nil, err
 		}
+	case proto.ImportStepPlanTouchedRegions:
+		deltaMetas, err := taskHandle.GetPreviousSubtaskMetas(task.ID, proto.ImportStepDeltaEncodeAndSort)
+		if err != nil {
+			return nil, err
+		}
+		previousSubtaskMetas[proto.ImportStepDeltaEncodeAndSort] = deltaMetas
+	case proto.ImportStepRegionMergeAndRebuild:
+		deltaMetas, err := taskHandle.GetPreviousSubtaskMetas(task.ID, proto.ImportStepDeltaEncodeAndSort)
+		if err != nil {
+			return nil, err
+		}
+		previousSubtaskMetas[proto.ImportStepDeltaEncodeAndSort] = deltaMetas
+	case proto.ImportStepIngestChangedRegions:
+		if err = sch.job2Step(ctx, logger, taskMeta, importer.JobStepImporting); err != nil {
+			return nil, err
+		}
 	case proto.ImportStepPostProcess:
 		sch.switchTiKV2NormalMode(ctx, task, logger)
 		failpoint.Inject("clearLastSwitchTime", func() {
@@ -370,17 +390,19 @@ func (sch *importScheduler) OnNextSubtasksBatch(
 		failpoint.Inject("failWhenDispatchPostProcessSubtask", func() {
 			failpoint.Return(nil, errors.New("injected error after ImportStepImport"))
 		})
-		step := getStepOfEncode(sch.GlobalSort)
+		step := getStepOfEncode(sch.GlobalSort, sch.UpsertMode)
 		metas, err := taskHandle.GetPreviousSubtaskMetas(task.ID, step)
 		if err != nil {
 			return nil, err
 		}
-		conflictResMetas, err := taskHandle.GetPreviousSubtaskMetas(task.ID, proto.ImportStepCollectConflicts)
-		if err != nil {
-			return nil, err
-		}
 		previousSubtaskMetas[step] = metas
-		previousSubtaskMetas[proto.ImportStepCollectConflicts] = conflictResMetas
+		if taskMeta.Plan.UpsertMode != importer.UpsertModeDelta {
+			conflictResMetas, err := taskHandle.GetPreviousSubtaskMetas(task.ID, proto.ImportStepCollectConflicts)
+			if err != nil {
+				return nil, err
+			}
+			previousSubtaskMetas[proto.ImportStepCollectConflicts] = conflictResMetas
+		}
 		logger.Info("move to post-process step", zap.Any("result", taskMeta.Summary))
 	case proto.StepDone:
 		return nil, nil
@@ -470,10 +492,21 @@ func (*importScheduler) IsRetryableErr(err error) bool {
 func (sch *importScheduler) GetNextStep(task *proto.TaskBase) proto.Step {
 	switch task.Step {
 	case proto.StepInit:
+		if sch.UpsertMode == importer.UpsertModeDelta {
+			return proto.ImportStepDeltaEncodeAndSort
+		}
 		if sch.GlobalSort {
 			return proto.ImportStepEncodeAndSort
 		}
 		return proto.ImportStepImport
+	case proto.ImportStepDeltaEncodeAndSort:
+		return proto.ImportStepPlanTouchedRegions
+	case proto.ImportStepPlanTouchedRegions:
+		return proto.ImportStepRegionMergeAndRebuild
+	case proto.ImportStepRegionMergeAndRebuild:
+		return proto.ImportStepIngestChangedRegions
+	case proto.ImportStepIngestChangedRegions:
+		return proto.ImportStepPostProcess
 	case proto.ImportStepEncodeAndSort:
 		return proto.ImportStepMergeSort
 	case proto.ImportStepMergeSort:
@@ -543,7 +576,10 @@ func updateMeta(task *proto.Task, taskMeta *TaskMeta) error {
 	return nil
 }
 
-func getStepOfEncode(globalSort bool) proto.Step {
+func getStepOfEncode(globalSort bool, upsertMode importer.UpsertMode) proto.Step {
+	if upsertMode == importer.UpsertModeDelta {
+		return proto.ImportStepDeltaEncodeAndSort
+	}
 	if globalSort {
 		return proto.ImportStepEncodeAndSort
 	}
@@ -567,8 +603,25 @@ func updateTaskSummary(
 		taskMeta.Summary.MergeSummary = p.summary
 	case proto.ImportStepWriteAndIngest:
 		taskMeta.Summary.IngestSummary = p.summary
+	case proto.ImportStepPlanTouchedRegions:
+		if taskMeta.Plan.IsUpsertDelta() {
+			taskMeta.Summary.ChangedRegionsPath = ChangedRegionsPath(taskMeta.JobID)
+		}
+	case proto.ImportStepRegionMergeAndRebuild:
+		if taskMeta.Plan.IsUpsertDelta() {
+			baseID := defaultBaseID(taskMeta.JobID)
+			baseURI := taskMeta.Plan.BaseURI
+			if baseURI == "" {
+				baseURI = taskMeta.Plan.CloudStorageURI
+			}
+			taskMeta.Summary.BaseID = baseID
+			taskMeta.Summary.BaseURI = baseURI
+			taskMeta.Summary.BaseManifestPath = BaseManifestPath(baseID)
+		}
+	case proto.ImportStepIngestChangedRegions:
+		taskMeta.Summary.IngestSummary = p.summary
 	case proto.ImportStepPostProcess:
-		subtaskSummaries, err := handle.GetPreviousSubtaskSummary(task.ID, getStepOfEncode(taskMeta.Plan.IsGlobalSort()))
+		subtaskSummaries, err := handle.GetPreviousSubtaskSummary(task.ID, getStepOfEncode(taskMeta.Plan.IsGlobalSort(), taskMeta.Plan.UpsertMode))
 		if err != nil {
 			return errors.Trace(err)
 		}

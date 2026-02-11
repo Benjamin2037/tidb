@@ -19,6 +19,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -103,6 +105,32 @@ func (p *LogicalPlan) writeExternalPlanMeta(planCtx planner.PlanCtx, specs []pla
 		return err
 	}
 	defer store.Close()
+	var altStore storeapi.Storage
+	needAltStore := false
+	for _, spec := range specs {
+		if wi, ok := spec.(*WriteIngestSpec); ok {
+			if uri := wi.WriteIngestStepMeta.StoreURI; uri != "" && uri != p.Plan.CloudStorageURI {
+				needAltStore = true
+				break
+			}
+		}
+	}
+	if needAltStore {
+		altURI := ""
+		for _, spec := range specs {
+			if wi, ok := spec.(*WriteIngestSpec); ok && wi.WriteIngestStepMeta.StoreURI != "" && wi.WriteIngestStepMeta.StoreURI != p.Plan.CloudStorageURI {
+				altURI = wi.WriteIngestStepMeta.StoreURI
+				break
+			}
+		}
+		if altURI != "" {
+			altStore, err = importer.GetSortStore(planCtx.Ctx, altURI)
+			if err != nil {
+				return err
+			}
+			defer altStore.Close()
+		}
+	}
 
 	for i, spec := range specs {
 		externalPath := external.PlanMetaPath(planCtx.TaskID, proto.Step2Str(proto.ImportInto, planCtx.NextTaskStep), i+1)
@@ -119,7 +147,11 @@ func (p *LogicalPlan) writeExternalPlanMeta(planCtx planner.PlanCtx, specs []pla
 			}
 		case *WriteIngestSpec:
 			sp.WriteIngestStepMeta.ExternalPath = externalPath
-			if err := sp.WriteIngestStepMeta.WriteJSONToExternalStorage(planCtx.Ctx, store, sp.WriteIngestStepMeta); err != nil {
+			metaStore := store
+			if sp.WriteIngestStepMeta.StoreURI != "" && sp.WriteIngestStepMeta.StoreURI != p.Plan.CloudStorageURI && altStore != nil {
+				metaStore = altStore
+			}
+			if err := sp.WriteIngestStepMeta.WriteJSONToExternalStorage(planCtx.Ctx, metaStore, sp.WriteIngestStepMeta); err != nil {
 				return err
 			}
 		case *CollectConflictsSpec:
@@ -130,6 +162,16 @@ func (p *LogicalPlan) writeExternalPlanMeta(planCtx planner.PlanCtx, specs []pla
 		case *ConflictResolutionSpec:
 			sp.ConflictResolutionStepMeta.ExternalPath = externalPath
 			if err := sp.ConflictResolutionStepMeta.WriteJSONToExternalStorage(planCtx.Ctx, store, sp.ConflictResolutionStepMeta); err != nil {
+				return err
+			}
+		case *PlanTouchedRegionsSpec:
+			sp.PlanTouchedRegionsStepMeta.ExternalPath = externalPath
+			if err := sp.PlanTouchedRegionsStepMeta.WriteJSONToExternalStorage(planCtx.Ctx, store, sp.PlanTouchedRegionsStepMeta); err != nil {
+				return err
+			}
+		case *RegionMergeSpec:
+			sp.RegionMergeStepMeta.ExternalPath = externalPath
+			if err := sp.RegionMergeStepMeta.WriteJSONToExternalStorage(planCtx.Ctx, store, sp.RegionMergeStepMeta); err != nil {
 				return err
 			}
 		}
@@ -164,7 +206,7 @@ func (p *LogicalPlan) ToPhysicalPlan(planCtx planner.PlanCtx) (*planner.Physical
 	// However, our current implementation requires generating it for each step.
 	// we only generate needed plans for the next step.
 	switch planCtx.NextTaskStep {
-	case proto.ImportStepImport, proto.ImportStepEncodeAndSort:
+	case proto.ImportStepImport, proto.ImportStepEncodeAndSort, proto.ImportStepDeltaEncodeAndSort:
 		specs, err := generateImportSpecs(planCtx, p)
 		if err != nil {
 			return nil, err
@@ -209,6 +251,33 @@ func (p *LogicalPlan) ToPhysicalPlan(planCtx planner.PlanCtx) (*planner.Physical
 			return nil, err
 		}
 		if err = p.writeExternalPlanMeta(planCtx, specs); err != nil {
+			return nil, err
+		}
+		addSpecs(specs)
+	case proto.ImportStepPlanTouchedRegions:
+		specs, err := generatePlanTouchedRegionsSpecs(planCtx, p)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.writeExternalPlanMeta(planCtx, specs); err != nil {
+			return nil, err
+		}
+		addSpecs(specs)
+	case proto.ImportStepRegionMergeAndRebuild:
+		specs, err := generateRegionMergeSpecs(planCtx, p)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.writeExternalPlanMeta(planCtx, specs); err != nil {
+			return nil, err
+		}
+		addSpecs(specs)
+	case proto.ImportStepIngestChangedRegions:
+		specs, err := generateIngestChangedRegionsSpecs(planCtx, p)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.writeExternalPlanMeta(planCtx, specs); err != nil {
 			return nil, err
 		}
 		addSpecs(specs)
@@ -284,6 +353,26 @@ func (s *ConflictResolutionSpec) ToSubtaskMeta(planner.PlanCtx) ([]byte, error) 
 	return s.ConflictResolutionStepMeta.Marshal()
 }
 
+// PlanTouchedRegionsSpec is the specification of plan touched regions step.
+type PlanTouchedRegionsSpec struct {
+	*PlanTouchedRegionsStepMeta
+}
+
+// ToSubtaskMeta converts the spec to subtask meta.
+func (s *PlanTouchedRegionsSpec) ToSubtaskMeta(planner.PlanCtx) ([]byte, error) {
+	return s.PlanTouchedRegionsStepMeta.Marshal()
+}
+
+// RegionMergeSpec is the specification of region merge step.
+type RegionMergeSpec struct {
+	*RegionMergeStepMeta
+}
+
+// ToSubtaskMeta converts the spec to subtask meta.
+func (s *RegionMergeSpec) ToSubtaskMeta(planner.PlanCtx) ([]byte, error) {
+	return s.RegionMergeStepMeta.Marshal()
+}
+
 // PostProcessSpec is the specification of a post process pipeline.
 type PostProcessSpec struct {
 	// for checksum request
@@ -293,7 +382,10 @@ type PostProcessSpec struct {
 
 // ToSubtaskMeta converts the post process spec to subtask meta.
 func (*PostProcessSpec) ToSubtaskMeta(planCtx planner.PlanCtx) ([]byte, error) {
-	encodeStep := getStepOfEncode(planCtx.GlobalSort)
+	encodeStep := getStepOfEncode(planCtx.GlobalSort, importer.UpsertModeNone)
+	if len(planCtx.PreviousSubtaskMetas[proto.ImportStepDeltaEncodeAndSort]) > 0 {
+		encodeStep = proto.ImportStepDeltaEncodeAndSort
+	}
 	subtaskMetas := make([]*ImportStepMeta, 0, len(planCtx.PreviousSubtaskMetas))
 	for _, bs := range planCtx.PreviousSubtaskMetas[encodeStep] {
 		var subtaskMeta ImportStepMeta
@@ -510,6 +602,227 @@ func generateWriteIngestSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([]planne
 		specs = append(specs, specsForOneSubtask...)
 	}
 	return specs, nil
+}
+
+func generatePlanTouchedRegionsSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([]planner.PipelineSpec, error) {
+	store, err := importer.GetSortStore(planCtx.Ctx, p.Plan.CloudStorageURI)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	kvMetas, err := getSortedKVMetasOfEncodeStep(planCtx.Ctx, planCtx.PreviousSubtaskMetas[proto.ImportStepDeltaEncodeAndSort], store)
+	if err != nil {
+		return nil, err
+	}
+	dataMeta := kvMetas[external.DataKVGroup]
+	deltaFiles := []string(nil)
+	var deltaStartKey, deltaEndKey string
+	if dataMeta != nil {
+		if len(dataMeta.StartKey) > 0 {
+			deltaStartKey = hex.EncodeToString(dataMeta.StartKey)
+		}
+		if len(dataMeta.EndKey) > 0 {
+			deltaEndKey = hex.EncodeToString(dataMeta.EndKey)
+		}
+		deltaFiles = dataMeta.GetDataFiles()
+	}
+	baseID := p.Plan.BaseVersion
+	spec := &PlanTouchedRegionsSpec{
+		PlanTouchedRegionsStepMeta: &PlanTouchedRegionsStepMeta{
+			BaseID:             baseID,
+			BaseURI:            p.Plan.BaseURI,
+			BaseManifestPath:   BaseManifestPath(baseID),
+			DeltaStoreURI:      p.Plan.CloudStorageURI,
+			DeltaDataFiles:     deltaFiles,
+			DeltaStartKey:      deltaStartKey,
+			DeltaEndKey:        deltaEndKey,
+			ChangedRegionsPath: ChangedRegionsPath(p.JobID),
+		},
+	}
+	return []planner.PipelineSpec{spec}, nil
+}
+
+func generateRegionMergeSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([]planner.PipelineSpec, error) {
+	store, err := importer.GetSortStore(planCtx.Ctx, p.Plan.CloudStorageURI)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	kvMetas, err := getSortedKVMetasOfEncodeStep(planCtx.Ctx, planCtx.PreviousSubtaskMetas[proto.ImportStepDeltaEncodeAndSort], store)
+	if err != nil {
+		return nil, err
+	}
+	dataMeta := kvMetas[external.DataKVGroup]
+	deltaFiles := []string(nil)
+	if dataMeta != nil {
+		deltaFiles = dataMeta.GetDataFiles()
+	}
+	baseID := p.Plan.BaseVersion
+	outputBaseID := "base-" + strconv.FormatInt(p.JobID, 10)
+	spec := &RegionMergeSpec{
+		RegionMergeStepMeta: &RegionMergeStepMeta{
+			BaseID:             baseID,
+			BaseURI:            p.Plan.BaseURI,
+			BaseManifestPath:   BaseManifestPath(baseID),
+			DeltaStoreURI:      p.Plan.CloudStorageURI,
+			DeltaDataFiles:     deltaFiles,
+			ChangedRegionsPath: ChangedRegionsPath(p.JobID),
+			OutputBaseID:       outputBaseID,
+			OutputManifestPath: BaseManifestPath(outputBaseID),
+		},
+	}
+	return []planner.PipelineSpec{spec}, nil
+}
+
+func generateIngestChangedRegionsSpecs(planCtx planner.PlanCtx, p *LogicalPlan) ([]planner.PipelineSpec, error) {
+	ctx := planCtx.Ctx
+	baseURI := p.Plan.BaseURI
+	if baseURI == "" {
+		baseURI = p.Plan.CloudStorageURI
+	}
+	baseStore, err := importer.GetSortStore(ctx, baseURI)
+	if err != nil {
+		return nil, err
+	}
+	defer baseStore.Close()
+
+	deltaStore, err := importer.GetSortStore(ctx, p.Plan.CloudStorageURI)
+	if err != nil {
+		return nil, err
+	}
+	defer deltaStore.Close()
+
+	changedRegions, err := ReadChangedRegionsManifest(ctx, deltaStore, ChangedRegionsPath(p.JobID))
+	if err != nil {
+		return nil, err
+	}
+	if len(changedRegions.Regions) == 0 {
+		return nil, nil
+	}
+
+	outputBaseID := defaultBaseID(p.JobID)
+	baseManifest, err := ReadBaseManifest(ctx, baseStore, BaseManifestPath(outputBaseID))
+	if err != nil {
+		return nil, err
+	}
+
+	regionMap := make(map[string]BaseRegionMeta, len(baseManifest.Regions))
+	for _, r := range baseManifest.Regions {
+		key := r.StartKey + ":" + r.EndKey
+		regionMap[key] = r
+	}
+
+	ver, err := planCtx.Store.CurrentVersion(tidbkv.GlobalTxnScope)
+	if err != nil {
+		return nil, err
+	}
+
+	specs := make([]planner.PipelineSpec, 0, len(changedRegions.Regions))
+	for _, cr := range changedRegions.Regions {
+		key := cr.StartKey + ":" + cr.EndKey
+		region, ok := regionMap[key]
+		if !ok {
+			return nil, errors.Errorf("region %s not found in base manifest %s", key, outputBaseID)
+		}
+		startKey, err := decodeHexKey(cr.StartKey)
+		if err != nil {
+			return nil, errors.Annotate(err, "decode changed region start key")
+		}
+		endKey, err := decodeHexKey(cr.EndKey)
+		if err != nil {
+			return nil, errors.Annotate(err, "decode changed region end key")
+		}
+		rangeKeys := [][]byte{startKey, endKey}
+
+		if len(region.DataFiles) > 0 {
+			if len(region.DataFiles) != len(region.StatFiles) {
+				return nil, errors.Errorf("data/stat files length mismatch for region %s", key)
+			}
+			p.summary.Bytes += int64(region.KVBytes)
+			specs = append(specs, &WriteIngestSpec{
+				WriteIngestStepMeta: &WriteIngestStepMeta{
+					KVGroup: external.DataKVGroup,
+					SortedKVMeta: external.SortedKVMeta{
+						StartKey:    startKey,
+						EndKey:      endKey,
+						TotalKVSize: region.KVBytes,
+					},
+					DataFiles:      region.DataFiles,
+					StatFiles:      region.StatFiles,
+					RangeJobKeys:   rangeKeys,
+					RangeSplitKeys: rangeKeys,
+					TS:             ver.Ver,
+					StoreURI:       baseURI,
+				},
+			})
+		}
+
+		indexGroups, err := groupIndexFiles(region.IndexFiles, region.IndexStatFiles)
+		if err != nil {
+			return nil, errors.Annotate(err, "group index files")
+		}
+		for kvGroup, files := range indexGroups {
+			specs = append(specs, &WriteIngestSpec{
+				WriteIngestStepMeta: &WriteIngestStepMeta{
+					KVGroup: kvGroup,
+					SortedKVMeta: external.SortedKVMeta{
+						StartKey: startKey,
+						EndKey:   endKey,
+					},
+					DataFiles:      files.data,
+					StatFiles:      files.stat,
+					RangeJobKeys:   rangeKeys,
+					RangeSplitKeys: rangeKeys,
+					TS:             ver.Ver,
+					StoreURI:       baseURI,
+				},
+			})
+		}
+	}
+	return specs, nil
+}
+
+type indexGroupFiles struct {
+	data []string
+	stat []string
+}
+
+func groupIndexFiles(indexFiles, indexStatFiles []string) (map[string]indexGroupFiles, error) {
+	if len(indexFiles) == 0 {
+		return nil, nil
+	}
+	if len(indexStatFiles) == 0 {
+		return nil, errors.New("index stat files are missing")
+	}
+	if len(indexStatFiles) != len(indexFiles) {
+		return nil, errors.New("index data/stat files length mismatch")
+	}
+	grouped := make(map[string]indexGroupFiles)
+	for i, file := range indexFiles {
+		kvGroup, ok := parseIndexKVGroup(file)
+		if !ok {
+			return nil, errors.Errorf("cannot parse index kv group from %s", file)
+		}
+		item := grouped[kvGroup]
+		item.data = append(item.data, file)
+		if len(indexStatFiles) > 0 {
+			item.stat = append(item.stat, indexStatFiles[i])
+		}
+		grouped[kvGroup] = item
+	}
+	return grouped, nil
+}
+
+func parseIndexKVGroup(file string) (string, bool) {
+	parts := strings.Split(file, "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == "index" && i+1 < len(parts) {
+			return parts[i+1], true
+		}
+	}
+	return "", false
 }
 
 func splitForOneSubtask(

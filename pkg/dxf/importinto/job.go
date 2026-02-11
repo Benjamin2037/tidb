@@ -310,12 +310,14 @@ func GetRuntimeInfoForJob(
 
 	if task.Step == proto.ImportStepPostProcess {
 		ri.ImportRows = taskMeta.Summary.ImportedRows
-	} else if task.Step != proto.ImportStepWriteAndIngest && task.Step != proto.ImportStepImport {
+	} else if task.Step != proto.ImportStepWriteAndIngest &&
+		task.Step != proto.ImportStepImport &&
+		task.Step != proto.ImportStepIngestChangedRegions {
 		ri.ImportRows = 0
 	}
 
 	switch task.Step {
-	case proto.ImportStepImport, proto.ImportStepWriteAndIngest:
+	case proto.ImportStepImport, proto.ImportStepWriteAndIngest, proto.ImportStepIngestChangedRegions:
 		ri.Total = taskMeta.Summary.IngestSummary.Bytes
 	case proto.ImportStepEncodeAndSort:
 		ri.Total = taskMeta.Summary.EncodeSummary.Bytes

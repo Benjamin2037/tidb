@@ -605,7 +605,11 @@ func (e *writeAndIngestStepExecutor) RunSubtask(ctx context.Context, subtask *pr
 		return errors.Trace(err)
 	}
 
-	accessRec, objStore, err := handle.NewObjStoreWithRecording(ctx, e.tableImporter.CloudStorageURI)
+	storeURI := e.tableImporter.CloudStorageURI
+	if sm.StoreURI != "" {
+		storeURI = sm.StoreURI
+	}
+	accessRec, objStore, err := handle.NewObjStoreWithRecording(ctx, storeURI)
 	if err != nil {
 		return err
 	}
@@ -827,7 +831,7 @@ func (e *importExecutor) GetStepExecutor(task *proto.Task) (execute.StepExecutor
 	}
 
 	switch task.Step {
-	case proto.ImportStepImport, proto.ImportStepEncodeAndSort:
+	case proto.ImportStepImport, proto.ImportStepEncodeAndSort, proto.ImportStepDeltaEncodeAndSort:
 		return &importStepExecutor{
 			taskID:       task.ID,
 			taskMeta:     &taskMeta,
@@ -851,10 +855,22 @@ func (e *importExecutor) GetStepExecutor(task *proto.Task) (execute.StepExecutor
 			store:        store,
 			indicesGenKV: indicesGenKV,
 		}, nil
+	case proto.ImportStepIngestChangedRegions:
+		return &writeAndIngestStepExecutor{
+			taskID:       task.ID,
+			taskMeta:     &taskMeta,
+			logger:       logger,
+			store:        store,
+			indicesGenKV: indicesGenKV,
+		}, nil
 	case proto.ImportStepCollectConflicts:
 		return NewCollectConflictsStepExecutor(&task.TaskBase, store, &taskMeta, logger), nil
 	case proto.ImportStepConflictResolution:
 		return NewConflictResolutionStepExecutor(&task.TaskBase, store, &taskMeta, logger), nil
+	case proto.ImportStepPlanTouchedRegions:
+		return NewPlanTouchedRegionsStepExecutor(&task.TaskBase, &taskMeta, logger), nil
+	case proto.ImportStepRegionMergeAndRebuild:
+		return NewRegionMergeStepExecutor(&task.TaskBase, store, &taskMeta, logger), nil
 	case proto.ImportStepPostProcess:
 		return NewPostProcessStepExecutor(task.ID, store, e.GetTaskTable(), &taskMeta, task.Keyspace, logger), nil
 	default:
