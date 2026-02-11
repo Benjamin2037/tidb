@@ -100,6 +100,7 @@ func buildBaseManifestForFull(
 			}
 		}
 		if meta.KVGroup != external.DataKVGroup {
+			// Base manifest stores only data KV ranges; index files are rebuilt when needed.
 			continue
 		}
 		dataMetas = append(dataMetas, meta)

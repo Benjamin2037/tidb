@@ -347,6 +347,8 @@ func (e *regionMergeStepExecutor) rebuildRegion(
 	pkCols []int64,
 	outputBaseID string,
 ) (BaseRegionMeta, uint64, uint64, uint64, error) {
+	// Merge two sorted streams (base + delta) by row key, applying delta bitmap
+	// to only overwrite columns present in the delta batch.
 	prefix := pathForOutputRegion(outputBaseID, rangeStartHex, rangeEndHex)
 
 	dataSummaryCh := make(chan *external.WriterSummary, 1)
@@ -581,6 +583,7 @@ func advanceIter(iter *external.MergeKVIter, start, end []byte) bool {
 	}
 	for iter.Next() {
 		key := iter.Key()
+		// Iterators can return keys outside the target range; skip until within [start, end).
 		if !withinRange(key, start, end) {
 			if len(end) > 0 && bytes.Compare(key, end) >= 0 {
 				return false
@@ -621,6 +624,7 @@ func decodeDeltaRowToMap(value []byte, handle tidbkv.Handle, colTypes map[int64]
 }
 
 func applyDeltaRowMap(baseMap map[int64]types.Datum, deltaMap map[int64]types.Datum, bitmap []byte, colIDsByIdx []int64) map[int64]types.Datum {
+	// bitmap indicates which column offsets are present in delta; only those are overwritten.
 	if baseMap == nil {
 		baseMap = make(map[int64]types.Datum, len(colIDsByIdx))
 	}

@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/errors"
 )
 
-// BuildColumnBitmap encodes column presence into a bitmap.
+// BuildColumnBitmap encodes column presence into a bitmap indexed by column offset.
 func BuildColumnBitmap(hasValue []bool) []byte {
 	if len(hasValue) == 0 {
 		return nil
@@ -48,7 +48,7 @@ func ColumnInBitmap(bitmap []byte, colIdx int) bool {
 	return bitmap[byteIdx]&(1<<uint(colIdx%8)) != 0
 }
 
-// EncodeDeltaRowValue prefixes the row value with a bitmap length and bytes.
+// EncodeDeltaRowValue prefixes the row value with a varint bitmap length and bitmap bytes.
 func EncodeDeltaRowValue(value []byte, bitmap []byte) []byte {
 	varintBuf := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(varintBuf, uint64(len(bitmap)))
@@ -59,7 +59,7 @@ func EncodeDeltaRowValue(value []byte, bitmap []byte) []byte {
 	return out
 }
 
-// DecodeDeltaRowValue decodes the bitmap and raw row value.
+// DecodeDeltaRowValue decodes a bitmap (length-prefixed) and the raw row value.
 func DecodeDeltaRowValue(value []byte) ([]byte, []byte, error) {
 	if len(value) == 0 {
 		return nil, nil, errors.New("delta row value is empty")
@@ -74,4 +74,3 @@ func DecodeDeltaRowValue(value []byte) ([]byte, []byte, error) {
 	}
 	return value[n:total], value[total:], nil
 }
-

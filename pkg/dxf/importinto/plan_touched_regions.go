@@ -110,12 +110,14 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 	if err != nil {
 		return errors.Annotate(err, "decode delta end key")
 	}
+	// deltaRangeKnown means the delta job exposes a key range; otherwise we may only
+	// know that delta data files exist without precise range boundaries.
 	deltaRangeKnown := len(deltaStart) > 0 || len(deltaEnd) > 0
 
 	if stMeta.BaseManifestPath == "" {
 		logger.Warn("base manifest missing, fallback to remote coprocessor scan on S3 SSTs")
 		changedRegions := make([]ChangedRegionMeta, 0, 1)
-		// fall back to full range to keep base data consistent
+		// Fallback to full range so rebuild does not miss any base data.
 		changedRegions = append(changedRegions, ChangedRegionMeta{
 			StartKey: "",
 			EndKey:   "",
@@ -147,8 +149,10 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 		overlap := false
 		switch {
 		case deltaRangeKnown:
+			// Fast path: use range overlap when delta exposes a range.
 			overlap = rangesOverlap(regionStart, regionEnd, deltaStart, deltaEnd)
 		case len(stMeta.DeltaDataFiles) > 0:
+			// Conservative path: if delta files exist but range is unknown, mark all regions.
 			overlap = true
 		}
 		if overlap {

@@ -172,6 +172,7 @@ func TestSchedulerExtLocalSort(t *testing.T) {
 }
 
 func TestSchedulerExtGlobalSort(t *testing.T) {
+	skipIfCannotListen(t)
 	host := "127.0.0.1"
 	port := uint16(4448)
 	opt := fakestorage.Options{

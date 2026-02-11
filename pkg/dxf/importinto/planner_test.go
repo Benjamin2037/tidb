@@ -18,10 +18,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/domain/serverinfo"
 	"github.com/pingcap/tidb/pkg/dxf/framework/planner"
@@ -141,7 +141,7 @@ func TestToPhysicalPlan(t *testing.T) {
 	require.ErrorContains(t, err, "provide a valid URI")
 }
 
-func genEncodeStepMetas(t *testing.T, cnt int) [][]byte {
+func genEncodeStepMetas(t *testing.T, cnt int, dataOverlap, indexOverlap int64) [][]byte {
 	stepMetaBytes := make([][]byte, 0, cnt)
 	for i := range cnt {
 		prefix := fmt.Sprintf("d_%d_", i)
@@ -153,9 +153,12 @@ func genEncodeStepMetas(t *testing.T, cnt int) [][]byte {
 				TotalKVSize: 12,
 				MultipleFilesStats: []external.MultipleFilesStat{
 					{
+						MinKey: kv.Key(prefix + "a"),
+						MaxKey: kv.Key(prefix + "c"),
 						Filenames: [][2]string{
 							{prefix + "/1", prefix + "/1.stat"},
 						},
+						MaxOverlappingNum: dataOverlap,
 					},
 				},
 			},
@@ -166,9 +169,12 @@ func genEncodeStepMetas(t *testing.T, cnt int) [][]byte {
 					TotalKVSize: 12,
 					MultipleFilesStats: []external.MultipleFilesStat{
 						{
+							MinKey: kv.Key(idxPrefix + "a"),
+							MaxKey: kv.Key(idxPrefix + "c"),
 							Filenames: [][2]string{
 								{idxPrefix + "/1", idxPrefix + "/1.stat"},
 							},
+							MaxOverlappingNum: indexOverlap,
 						},
 					},
 				},
@@ -187,12 +193,7 @@ func TestGenerateMergeSortSpecs(t *testing.T) {
 	t.Cleanup(func() {
 		external.MaxMergeSortFileCountStep = stepBak
 	})
-	// force merge sort for data kv
-	require.NoError(t, failpoint.Enable("github.com/pingcap/tidb/pkg/dxf/importinto/forceMergeSort", `return("data")`))
-	t.Cleanup(func() {
-		require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/dxf/importinto/forceMergeSort"))
-	})
-	encodeStepMetaBytes := genEncodeStepMetas(t, 3)
+	encodeStepMetaBytes := genEncodeStepMetas(t, 3, 5000, 0)
 	planCtx := planner.PlanCtx{
 		Ctx:    context.Background(),
 		TaskID: 1,
@@ -226,8 +227,6 @@ func TestGenerateMergeSortSpecs(t *testing.T) {
 	require.Len(t, specs[1].(*MergeSortSpec).DataFiles, 1)
 	require.Equal(t, "d_2_/1", specs[1].(*MergeSortSpec).DataFiles[0])
 
-	// force merge sort for all kv groups
-	require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/dxf/importinto/forceMergeSort"))
 	p.Plan.ForceMergeStep = true
 	specs, err = generateMergeSortSpecs(planCtx, p)
 	require.NoError(t, err)
@@ -263,7 +262,8 @@ func TestGenerateIngestChangedRegionsSpecs(t *testing.T) {
 		require.NoError(t, kvstore.Close())
 	})
 
-	baseURI := "memstore:///"
+	baseDir := t.TempDir()
+	baseURI := "local://" + filepath.ToSlash(baseDir)
 	store, err := importer.GetSortStore(ctx, baseURI)
 	require.NoError(t, err)
 	defer store.Close()
@@ -324,6 +324,7 @@ func TestGenerateIngestChangedRegionsSpecs(t *testing.T) {
 	require.Equal(t, baseURI, groups["1"].StoreURI)
 	require.Equal(t, baseManifest.Regions[0].DataFiles, groups[external.DataKVGroup].DataFiles)
 	require.Equal(t, baseManifest.Regions[0].IndexFiles, groups["1"].DataFiles)
+
 }
 
 func genMergeStepMetas(t *testing.T, cnt int) [][]byte {
@@ -353,7 +354,7 @@ func genMergeStepMetas(t *testing.T, cnt int) [][]byte {
 }
 
 func TestGetSortedKVMetas(t *testing.T) {
-	encodeStepMetaBytes := genEncodeStepMetas(t, 3)
+	encodeStepMetaBytes := genEncodeStepMetas(t, 3, 5000, 0)
 	kvMetas, err := getSortedKVMetasOfEncodeStep(context.Background(), encodeStepMetaBytes, nil)
 	require.NoError(t, err)
 	require.Len(t, kvMetas, 2)
@@ -372,12 +373,8 @@ func TestGetSortedKVMetas(t *testing.T) {
 	require.Equal(t, []byte("x_0_a"), kvMetas2["data"].StartKey)
 	require.Equal(t, []byte("x_2_c"), kvMetas2["data"].EndKey)
 
-	// force merge sort for data kv
-	require.NoError(t, failpoint.Enable("github.com/pingcap/tidb/pkg/dxf/importinto/forceMergeSort", `return("data")`))
-	t.Cleanup(func() {
-		require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/dxf/importinto/forceMergeSort"))
-	})
 	allKVMetas, err := getSortedKVMetasForIngest(planner.PlanCtx{
+		Ctx: context.Background(),
 		PreviousSubtaskMetas: map[proto.Step][][]byte{
 			proto.ImportStepEncodeAndSort: encodeStepMetaBytes,
 			proto.ImportStepMergeSort:     mergeStepMetas,

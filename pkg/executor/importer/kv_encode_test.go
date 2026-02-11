@@ -85,3 +85,58 @@ func TestKVEncoderForDupResolve(t *testing.T) {
 		require.Greater(t, handleLargerThanOneCount, 1)
 	})
 }
+
+func TestDeltaRowEncodingRecordOnly(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("use test")
+	tk.MustExec("create table t (a bigint primary key, b int, index idx_b(b))")
+	do, err := session.GetDomain(store)
+	require.NoError(t, err)
+	table, err := do.InfoSchema().TableByName(context.Background(), ast.NewCIStr("test"), ast.NewCIStr("t"))
+	require.NoError(t, err)
+
+	buildController := func(mode importer.UpsertMode) *importer.LoadDataController {
+		cols := table.VisibleCols()
+		mappings := make([]*importer.FieldMapping, 0, len(cols))
+		for _, col := range cols {
+			mappings = append(mappings, &importer.FieldMapping{Column: col})
+		}
+		return &importer.LoadDataController{
+			ASTArgs:       &importer.ASTArgs{},
+			Plan:          &importer.Plan{UpsertMode: mode},
+			Table:         table,
+			FieldMappings: mappings,
+			InsertColumns: cols,
+		}
+	}
+
+	encodeCfg := &encode.EncodingConfig{Table: table}
+	deltaEnc, err := importer.NewTableKVEncoder(encodeCfg, buildController(importer.UpsertModeDelta))
+	require.NoError(t, err)
+	plainEnc, err := importer.NewTableKVEncoder(encodeCfg, buildController(importer.UpsertModeNone))
+	require.NoError(t, err)
+
+	row := []types.Datum{types.NewDatum(1), types.NewDatum(2)}
+	deltaPairs, err := deltaEnc.Encode(row, 1)
+	require.NoError(t, err)
+	plainPairs, err := plainEnc.Encode(row, 1)
+	require.NoError(t, err)
+
+	plainByKey := make(map[string][]byte, len(plainPairs.Pairs))
+	for _, pair := range plainPairs.Pairs {
+		plainByKey[string(pair.Key)] = pair.Val
+	}
+	for _, pair := range deltaPairs.Pairs {
+		plainVal, ok := plainByKey[string(pair.Key)]
+		require.True(t, ok)
+		if tablecodec.IsRecordKey(pair.Key) {
+			bitmap, raw, err := importer.DecodeDeltaRowValue(pair.Val)
+			require.NoError(t, err)
+			require.NotEmpty(t, bitmap)
+			require.Equal(t, plainVal, raw)
+		} else {
+			require.Equal(t, plainVal, pair.Val)
+		}
+	}
+}

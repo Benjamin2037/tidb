@@ -165,8 +165,8 @@ func (s *importIntoSuite) TestGetNextStep() {
 }
 
 func (s *importIntoSuite) TestGetStepOfEncode() {
-	s.Equal(proto.ImportStepImport, getStepOfEncode(false))
-	s.Equal(proto.ImportStepEncodeAndSort, getStepOfEncode(true))
+	s.Equal(proto.ImportStepImport, getStepOfEncode(false, importer.UpsertModeNone))
+	s.Equal(proto.ImportStepEncodeAndSort, getStepOfEncode(true, importer.UpsertModeNone))
 }
 
 func (s *importIntoSuite) TestIsRetryable() {
@@ -183,4 +183,16 @@ func TestIsImporting2TiKV(t *testing.T) {
 	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepImport}}))
 	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepWriteAndIngest}}))
 	require.True(t, ext.isImporting2TiKV(&proto.Task{TaskBase: proto.TaskBase{Step: proto.ImportStepIngestChangedRegions}}))
+}
+
+func TestUpdateTaskSummaryDeltaURI(t *testing.T) {
+	taskMeta := &TaskMeta{
+		JobID:  123,
+		Plan:   importer.Plan{UpsertMode: importer.UpsertModeDelta, CloudStorageURI: "s3://bucket/path"},
+		Summary: importer.Summary{},
+	}
+	task := &proto.Task{TaskBase: proto.TaskBase{ID: 1}}
+	require.NoError(t, updateTaskSummary(nil, task, taskMeta, proto.ImportStepPlanTouchedRegions, &LogicalPlan{}))
+	require.Equal(t, ChangedRegionsPath(123), taskMeta.Summary.ChangedRegionsPath)
+	require.Equal(t, "s3://bucket/path", taskMeta.Summary.DeltaURI)
 }
