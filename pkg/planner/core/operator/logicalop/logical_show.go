@@ -58,6 +58,7 @@ type ShowContents struct {
 
 	ImportJobID       *int64 // Used for SHOW LOAD DATA JOB <jobID>
 	ImportGroupKey    string // Used for SHOW IMPORT GROUP <GROUP_KEY>
+	ImportBaseID      string // Used for SHOW IMPORT REGIONS BASE <ID>
 	DistributionJobID *int64 // Used for SHOW DISTRIBUTION JOB <JobID>
 }
 
@@ -70,7 +71,7 @@ func (s *ShowContents) MemoryUsage() (sum int64) {
 	}
 
 	sum = emptyShowContentsSize + int64(len(s.DBName)) + s.Partition.MemoryUsage() + s.IndexName.MemoryUsage() +
-		int64(cap(s.Roles))*size.SizeOfPointer
+		int64(cap(s.Roles))*size.SizeOfPointer + int64(len(s.ImportGroupKey)) + int64(len(s.ImportBaseID))
 	return
 }
 

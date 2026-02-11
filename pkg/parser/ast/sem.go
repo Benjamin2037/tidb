@@ -232,6 +232,16 @@ const (
 	ShowImportJobsCommand = "SHOW IMPORT JOBS"
 	// ShowImportGroupsCommand represents SHOW IMPORT GROUPS statement
 	ShowImportGroupsCommand = "SHOW IMPORT GROUPS"
+	// ShowImportBasesCommand represents SHOW IMPORT BASES statement
+	ShowImportBasesCommand = "SHOW IMPORT BASES"
+	// ShowImportRegionsCommand represents SHOW IMPORT REGIONS statement
+	ShowImportRegionsCommand = "SHOW IMPORT REGIONS"
+	// ShowImportChangedRegionsCommand represents SHOW IMPORT CHANGED REGIONS statement
+	ShowImportChangedRegionsCommand = "SHOW IMPORT CHANGED REGIONS"
+	// ShowImportCostCommand represents SHOW IMPORT COST statement
+	ShowImportCostCommand = "SHOW IMPORT COST"
+	// ShowImportMeteringCommand represents SHOW IMPORT METERING statement
+	ShowImportMeteringCommand = "SHOW IMPORT METERING"
 	// ShowPlacementCommand represents SHOW PLACEMENT statement
 	ShowPlacementCommand = "SHOW PLACEMENT"
 	// ShowPlacementForDatabaseCommand represents SHOW PLACEMENT FOR DATABASE statement
@@ -263,6 +273,8 @@ const (
 	AdminCheckTableCommand = "ADMIN CHECK TABLE"
 	// AdminShowDDLJobsCommand represents ADMIN SHOW DDL JOBS statement
 	AdminShowDDLJobsCommand = "ADMIN SHOW DDL JOBS"
+	// AdminIngestChangedRegionsCommand represents ADMIN INGEST CHANGED REGIONS statement
+	AdminIngestChangedRegionsCommand = "ADMIN INGEST CHANGED REGIONS"
 	// AdminCancelDDLJobsCommand represents ADMIN CANCEL DDL JOBS statement
 	AdminCancelDDLJobsCommand = "ADMIN CANCEL DDL JOBS"
 	// AdminPauseDDLJobsCommand represents ADMIN PAUSE DDL JOBS statement
@@ -811,6 +823,16 @@ func (n *ShowStmt) SEMCommand() string {
 		return ShowImportJobsCommand
 	case ShowImportGroups:
 		return ShowImportGroupsCommand
+	case ShowImportBases:
+		return ShowImportBasesCommand
+	case ShowImportRegions:
+		return ShowImportRegionsCommand
+	case ShowImportChangedRegions:
+		return ShowImportChangedRegionsCommand
+	case ShowImportCost:
+		return ShowImportCostCommand
+	case ShowImportMetering:
+		return ShowImportMeteringCommand
 	case ShowPlacement:
 		return ShowPlacementCommand
 	case ShowPlacementForDatabase:
@@ -860,6 +882,8 @@ func (n *AdminStmt) SEMCommand() string {
 		return AdminCheckTableCommand
 	case AdminShowDDLJobs:
 		return AdminShowDDLJobsCommand
+	case AdminIngestChangedRegions:
+		return AdminIngestChangedRegionsCommand
 	case AdminCancelDDLJobs:
 		return AdminCancelDDLJobsCommand
 	case AdminPauseDDLJobs:

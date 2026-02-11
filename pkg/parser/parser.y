@@ -334,6 +334,8 @@ import (
 	backend                    "BACKEND"
 	backup                     "BACKUP"
 	backups                    "BACKUPS"
+	base                       "BASE"
+	bases                      "BASES"
 	bdr                        "BDR"
 	begin                      "BEGIN"
 	bernoulli                  "BERNOULLI"
@@ -353,6 +355,7 @@ import (
 	cascaded                   "CASCADED"
 	causal                     "CAUSAL"
 	chain                      "CHAIN"
+	changed                    "CHANGED"
 	charsetKwd                 "CHARSET"
 	checkpoint                 "CHECKPOINT"
 	checksum                   "CHECKSUM"
@@ -377,6 +380,7 @@ import (
 	compression                "COMPRESSION"
 	compressionLevel           "COMPRESSION_LEVEL"
 	compressionType            "COMPRESSION_TYPE"
+	cost                       "COST"
 	concurrency                "CONCURRENCY"
 	config                     "CONFIG"
 	connection                 "CONNECTION"
@@ -464,6 +468,7 @@ import (
 	imports                    "IMPORTS"
 	increment                  "INCREMENT"
 	incremental                "INCREMENTAL"
+	ingest                     "INGEST"
 	indexes                    "INDEXES"
 	insertMethod               "INSERT_METHOD"
 	instance                   "INSTANCE"
@@ -498,6 +503,7 @@ import (
 	maxUserConnections         "MAX_USER_CONNECTIONS"
 	mb                         "MB"
 	member                     "MEMBER"
+	metering                   "METERING"
 	memory                     "MEMORY"
 	merge                      "MERGE"
 	microsecond                "MICROSECOND"
@@ -7335,6 +7341,7 @@ UnReservedKeyword:
 |	"AGAINST"
 |	"EXPANSION"
 |	"INCREMENT"
+|	"INGEST"
 |	"MINVALUE"
 |	"NOMAXVALUE"
 |	"NOMINVALUE"
@@ -7354,8 +7361,12 @@ UnReservedKeyword:
 |	"AGO"
 |	"BACKUP"
 |	"BACKUPS"
+|	"BASE"
+|	"BASES"
 |	"CONCURRENCY"
+|	"COST"
 |	"MB"
+|	"METERING"
 |	"ONLINE"
 |	"RATE_LIMIT"
 |	"RESTORE"
@@ -7363,6 +7374,7 @@ UnReservedKeyword:
 |	"SEND_CREDENTIALS_TO_TIKV"
 |	"LAST_BACKUP"
 |	"CHECKPOINT"
+|	"CHANGED"
 |	"SKIP_SCHEMA_FILES"
 |	"STRICT_FORMAT"
 |	"BACKEND"
@@ -11600,6 +11612,14 @@ AdminStmt:
 			Tables: $4.([]*ast.TableName),
 		}
 	}
+|	"ADMIN" "INGEST" "CHANGED" "REGIONS" "JOB" Int64Num
+	{
+		v := $6.(int64)
+		$$ = &ast.AdminStmt{
+			Tp:     ast.AdminIngestChangedRegions,
+			JobIDs: []int64{v},
+		}
+	}
 |	"ADMIN" "CANCEL" "DDL" "JOBS" NumList
 	{
 		$$ = &ast.AdminStmt{
@@ -12032,6 +12052,37 @@ ShowStmt:
 			ImportJobID: &v,
 		}
 	}
+|	"SHOW" "IMPORT" "REGIONS" "BASE" stringLit
+	{
+		$$ = &ast.ShowStmt{
+			Tp:           ast.ShowImportRegions,
+			ImportBaseID: $5,
+		}
+	}
+|	"SHOW" "IMPORT" "CHANGED" "REGIONS" "JOB" Int64Num
+	{
+		v := $6.(int64)
+		$$ = &ast.ShowStmt{
+			Tp:          ast.ShowImportChangedRegions,
+			ImportJobID: &v,
+		}
+	}
+|	"SHOW" "IMPORT" "COST" "JOB" Int64Num
+	{
+		v := $5.(int64)
+		$$ = &ast.ShowStmt{
+			Tp:          ast.ShowImportCost,
+			ImportJobID: &v,
+		}
+	}
+|	"SHOW" "IMPORT" "METERING" "JOB" Int64Num
+	{
+		v := $5.(int64)
+		$$ = &ast.ShowStmt{
+			Tp:          ast.ShowImportMetering,
+			ImportJobID: &v,
+		}
+	}
 |	"SHOW" "DISTRIBUTION" "JOB" Int64Num
 	{
 		v := $4.(int64)
@@ -12390,6 +12441,10 @@ ShowTargetFilterable:
 |	"IMPORT" "GROUPS"
 	{
 		$$ = &ast.ShowStmt{Tp: ast.ShowImportGroups}
+	}
+|	"IMPORT" "BASES"
+	{
+		$$ = &ast.ShowStmt{Tp: ast.ShowImportBases}
 	}
 |	"IMPORT" "GROUP" stringLit
 	{

@@ -28,11 +28,16 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
+	meter_config "github.com/pingcap/metering_sdk/config"
+	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
+	meteringstorage "github.com/pingcap/metering_sdk/storage"
 	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/pkg/bindinfo"
+	tidbconfig "github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/domain"
 	"github.com/pingcap/tidb/pkg/domain/infosync"
+	dxfmetering "github.com/pingcap/tidb/pkg/dxf/framework/metering"
 	"github.com/pingcap/tidb/pkg/dxf/framework/proto"
 	fstorage "github.com/pingcap/tidb/pkg/dxf/framework/storage"
 	"github.com/pingcap/tidb/pkg/dxf/importinto"
@@ -120,6 +125,7 @@ type ShowExec struct {
 	ImportJobID       *int64
 	DistributionJobID *int64
 	ImportGroupKey    string // Used for SHOW IMPORT GROUP <GROUP_KEY>
+	ImportBaseID      string // Used for SHOW IMPORT REGIONS BASE <ID>
 }
 
 type showTableRegionRowItem struct {
@@ -291,6 +297,16 @@ func (e *ShowExec) fetchAll(ctx context.Context) error {
 		return e.fetchShowImportJobs(ctx)
 	case ast.ShowImportGroups:
 		return e.fetchShowImportGroups(ctx)
+	case ast.ShowImportBases:
+		return e.fetchShowImportBases(ctx)
+	case ast.ShowImportRegions:
+		return e.fetchShowImportRegions(ctx)
+	case ast.ShowImportChangedRegions:
+		return e.fetchShowImportChangedRegions(ctx)
+	case ast.ShowImportMetering:
+		return e.fetchShowImportMetering(ctx)
+	case ast.ShowImportCost:
+		return e.fetchShowImportCost(ctx)
 	case ast.ShowDistributionJobs:
 		return e.fetchShowDistributionJobs(ctx)
 	case ast.ShowAffinity:
@@ -2766,6 +2782,638 @@ func (e *ShowExec) fetchShowImportJobs(ctx context.Context) error {
 	}
 	// TODO: does not support filtering for now
 	return nil
+}
+
+func (e *ShowExec) fetchShowImportBases(ctx context.Context) error {
+	sctx := e.Ctx()
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	var infos []*importer.JobInfo
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		var err2 error
+		infos, err2 = importer.GetAllViewableJobs(ctx, exec, sctx.GetSessionVars().User.String(), hasSuperPriv)
+		return err2
+	}); err != nil {
+		return err
+	}
+
+	loc := sctx.GetSessionVars().Location()
+	for _, info := range infos {
+		if info.Summary == nil || info.Summary.BaseID == "" {
+			continue
+		}
+		baseID := info.Summary.BaseID
+		baseURI := info.Summary.BaseURI
+		manifestPath := info.Summary.BaseManifestPath
+		if baseURI == "" || manifestPath == "" {
+			taskMeta, err := getImportTaskMetaByJobID(ctx, info.ID)
+			if err != nil {
+				return err
+			}
+			if baseURI == "" {
+				baseURI = taskMeta.Plan.BaseURI
+				if baseURI == "" {
+					baseURI = taskMeta.Plan.CloudStorageURI
+				}
+			}
+			if manifestPath == "" {
+				manifestPath = importinto.BaseManifestPath(baseID)
+			}
+		}
+		manifest, err := readBaseManifest(ctx, baseURI, manifestPath)
+		if err != nil {
+			return err
+		}
+		var createTime any
+		if !manifest.CreateTime.IsZero() {
+			createTime = types.NewTime(types.FromGoTime(manifest.CreateTime.In(loc)), mysql.TypeDatetime, types.DefaultFsp)
+		}
+		e.appendRow([]any{
+			baseID,
+			info.ID,
+			info.TableSchema,
+			info.TableName,
+			info.TableID,
+			baseURI,
+			manifestPath,
+			createTime,
+			info.CreatedBy,
+			int64(manifest.RowCount),
+			int64(manifest.DataBytes),
+			int64(manifest.IndexBytes),
+		})
+	}
+	return nil
+}
+
+func (e *ShowExec) fetchShowImportRegions(ctx context.Context) error {
+	if e.ImportBaseID == "" {
+		return errors.New("base id is empty")
+	}
+	sctx := e.Ctx()
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	baseID := e.ImportBaseID
+	var info *importer.JobInfo
+	if jobID, ok := parseBaseID(baseID); ok {
+		if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+			exec := se.GetSQLExecutor()
+			var err2 error
+			info, err2 = importer.GetJob(ctx, exec, jobID, sctx.GetSessionVars().User.String(), hasSuperPriv)
+			return err2
+		}); err != nil {
+			return err
+		}
+		if info.Summary == nil || info.Summary.BaseID != baseID {
+			info = nil
+		}
+	}
+	if info == nil {
+		var infos []*importer.JobInfo
+		if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+			exec := se.GetSQLExecutor()
+			var err2 error
+			infos, err2 = importer.GetAllViewableJobs(ctx, exec, sctx.GetSessionVars().User.String(), hasSuperPriv)
+			return err2
+		}); err != nil {
+			return err
+		}
+		for _, item := range infos {
+			if item.Summary != nil && item.Summary.BaseID == baseID {
+				info = item
+				break
+			}
+		}
+	}
+	if info == nil || info.Summary == nil || info.Summary.BaseID == "" {
+		return errors.Errorf("base id %s not found", baseID)
+	}
+
+	baseURI := info.Summary.BaseURI
+	manifestPath := info.Summary.BaseManifestPath
+	if baseURI == "" || manifestPath == "" {
+		taskMeta, err := getImportTaskMetaByJobID(ctx, info.ID)
+		if err != nil {
+			return err
+		}
+		if baseURI == "" {
+			baseURI = taskMeta.Plan.BaseURI
+			if baseURI == "" {
+				baseURI = taskMeta.Plan.CloudStorageURI
+			}
+		}
+		if manifestPath == "" {
+			manifestPath = importinto.BaseManifestPath(baseID)
+		}
+	}
+	manifest, err := readBaseManifest(ctx, baseURI, manifestPath)
+	if err != nil {
+		return err
+	}
+
+	for _, region := range manifest.Regions {
+		dataJSON, err := toBinaryJSON(region.DataFiles)
+		if err != nil {
+			return err
+		}
+		statJSON, err := toBinaryJSON(region.StatFiles)
+		if err != nil {
+			return err
+		}
+		indexJSON, err := toBinaryJSON(region.IndexFiles)
+		if err != nil {
+			return err
+		}
+		e.appendRow([]any{
+			region.StartKey,
+			region.EndKey,
+			dataJSON,
+			statJSON,
+			indexJSON,
+			region.Checksum,
+			int64(region.KVBytes),
+		})
+	}
+	return nil
+}
+
+func (e *ShowExec) fetchShowImportChangedRegions(ctx context.Context) error {
+	if e.ImportJobID == nil {
+		return errors.New("job id is empty")
+	}
+	sctx := e.Ctx()
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	jobID := *e.ImportJobID
+	var info *importer.JobInfo
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		var err2 error
+		info, err2 = importer.GetJob(ctx, exec, jobID, sctx.GetSessionVars().User.String(), hasSuperPriv)
+		return err2
+	}); err != nil {
+		return err
+	}
+
+	taskMeta, err := getImportTaskMetaByJobID(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	deltaURI := taskMeta.Plan.CloudStorageURI
+	if deltaURI == "" {
+		deltaURI = taskMeta.Plan.BaseURI
+	}
+	if deltaURI == "" {
+		return errors.New("cloud storage uri is empty")
+	}
+	manifestPath := importinto.ChangedRegionsPath(jobID)
+	if info.Summary != nil && info.Summary.ChangedRegionsPath != "" {
+		manifestPath = info.Summary.ChangedRegionsPath
+	}
+	changed, err := readChangedRegionsManifest(ctx, deltaURI, manifestPath)
+	if err != nil {
+		return err
+	}
+	baseID := ""
+	if info.Summary != nil {
+		baseID = info.Summary.BaseID
+	}
+	if changed.BaseID != "" {
+		baseID = changed.BaseID
+	}
+
+	for _, region := range changed.Regions {
+		e.appendRow([]any{
+			jobID,
+			baseID,
+			region.StartKey,
+			region.EndKey,
+			int64(region.ChangedRows),
+			int64(region.KVBytes),
+		})
+	}
+	return nil
+}
+
+func (e *ShowExec) fetchShowImportMetering(ctx context.Context) error {
+	if e.ImportJobID == nil {
+		return errors.New("job id is empty")
+	}
+	sctx := e.Ctx()
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	jobID := *e.ImportJobID
+	var info *importer.JobInfo
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		var err2 error
+		info, err2 = importer.GetJob(ctx, exec, jobID, sctx.GetSessionVars().User.String(), hasSuperPriv)
+		return err2
+	}); err != nil {
+		return err
+	}
+
+	task, err := getImportTaskByJobID(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	reader, err := newMeteringReader()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	startTime, endTime, err := getMeteringTimeRange(info, sctx.GetSessionVars().Location())
+	if err != nil {
+		return err
+	}
+	items, err := collectMeteringItemsForTask(ctx, reader, task.ID, startTime, endTime)
+	if err != nil {
+		return err
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].timestamp < items[j].timestamp
+	})
+
+	loc := sctx.GetSessionVars().Location()
+	for _, item := range items {
+		meteringTime := types.NewTime(types.FromGoTime(time.Unix(item.timestamp, 0).In(loc)), mysql.TypeDatetime, types.DefaultFsp)
+		e.appendRow([]any{
+			jobID,
+			task.ID,
+			meteringTime,
+			item.getRequests,
+			item.putRequests,
+			item.objStoreReadBytes,
+			item.objStoreWriteBytes,
+			item.clusterReadBytes,
+			item.clusterWriteBytes,
+			item.rowCount,
+			item.dataKVBytes,
+			item.indexKVBytes,
+			item.requiredSlots,
+			item.maxNodeCount,
+			item.durationSeconds,
+		})
+	}
+	return nil
+}
+
+func (e *ShowExec) fetchShowImportCost(ctx context.Context) error {
+	if e.ImportJobID == nil {
+		return errors.New("job id is empty")
+	}
+	sctx := e.Ctx()
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	jobID := *e.ImportJobID
+	var info *importer.JobInfo
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		var err2 error
+		info, err2 = importer.GetJob(ctx, exec, jobID, sctx.GetSessionVars().User.String(), hasSuperPriv)
+		return err2
+	}); err != nil {
+		return err
+	}
+
+	task, err := getImportTaskByJobID(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	reader, err := newMeteringReader()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	startTime, endTime, err := getMeteringTimeRange(info, sctx.GetSessionVars().Location())
+	if err != nil {
+		return err
+	}
+	items, err := collectMeteringItemsForTask(ctx, reader, task.ID, startTime, endTime)
+	if err != nil {
+		return err
+	}
+
+	byTS := aggregateMeteringCost(items)
+	loc := sctx.GetSessionVars().Location()
+	timestamps := make([]int64, 0, len(byTS))
+	for ts := range byTS {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+	for _, ts := range timestamps {
+		row := byTS[ts]
+		meteringTime := types.NewTime(types.FromGoTime(time.Unix(ts, 0).In(loc)), mysql.TypeDatetime, types.DefaultFsp)
+		e.appendRow([]any{
+			jobID,
+			meteringTime,
+			row.getCost,
+			row.putCost,
+			row.objStoreReadCost,
+			row.objStoreWriteCost,
+			row.clusterWriteCost,
+			row.totalCost,
+		})
+	}
+	return nil
+}
+
+func getImportTaskMetaByJobID(ctx context.Context, jobID int64) (*importinto.TaskMeta, error) {
+	task, err := getImportTaskByJobID(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	var taskMeta importinto.TaskMeta
+	if err := gjson.Unmarshal(task.Meta, &taskMeta); err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &taskMeta, nil
+}
+
+func getImportTaskByJobID(ctx context.Context, jobID int64) (*proto.Task, error) {
+	taskManager, err := fstorage.GetDXFSvcTaskMgr()
+	if err != nil {
+		return nil, err
+	}
+	return taskManager.GetTaskByKeyWithHistory(ctx, importinto.TaskKey(jobID))
+}
+
+type meteringItem struct {
+	timestamp          int64
+	getRequests        int64
+	putRequests        int64
+	objStoreReadBytes  int64
+	objStoreWriteBytes int64
+	clusterReadBytes   int64
+	clusterWriteBytes  int64
+	rowCount           int64
+	dataKVBytes        int64
+	indexKVBytes       int64
+	requiredSlots      int64
+	maxNodeCount       int64
+	durationSeconds    int64
+}
+
+type importCostRow struct {
+	getCost           float64
+	putCost           float64
+	objStoreReadCost  float64
+	objStoreWriteCost float64
+	clusterWriteCost  float64
+	totalCost         float64
+}
+
+type importCostRate struct {
+	getCostPer1K           float64
+	putCostPer1K           float64
+	objStoreReadCostPerGB  float64
+	objStoreWriteCostPerGB float64
+	clusterWriteCostPerGB  float64
+}
+
+var defaultImportCostRate = importCostRate{
+	getCostPer1K:           0.0004,
+	putCostPer1K:           0.005,
+	objStoreReadCostPerGB:  0,
+	objStoreWriteCostPerGB: 0,
+	clusterWriteCostPerGB:  0,
+}
+
+func aggregateMeteringCost(items []meteringItem) map[int64]importCostRow {
+	result := make(map[int64]importCostRow)
+	for _, item := range items {
+		row := result[item.timestamp]
+		row.getCost += float64(item.getRequests) / 1000 * defaultImportCostRate.getCostPer1K
+		row.putCost += float64(item.putRequests) / 1000 * defaultImportCostRate.putCostPer1K
+		row.objStoreReadCost += bytesToGB(item.objStoreReadBytes) * defaultImportCostRate.objStoreReadCostPerGB
+		row.objStoreWriteCost += bytesToGB(item.objStoreWriteBytes) * defaultImportCostRate.objStoreWriteCostPerGB
+		row.clusterWriteCost += bytesToGB(item.clusterWriteBytes) * defaultImportCostRate.clusterWriteCostPerGB
+		row.totalCost = row.getCost + row.putCost + row.objStoreReadCost + row.objStoreWriteCost + row.clusterWriteCost
+		result[item.timestamp] = row
+	}
+	return result
+}
+
+func bytesToGB(v int64) float64 {
+	if v <= 0 {
+		return 0
+	}
+	return float64(v) / (1024 * 1024 * 1024)
+}
+
+func newMeteringReader() (*meteringreader.MeteringReader, error) {
+	uri := tidbconfig.GetGlobalConfig().MeteringStorageURI
+	if uri == "" {
+		return nil, errors.New("metering storage uri is empty")
+	}
+	cfg, err := meter_config.NewFromURI(uri)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	provider, err := meteringstorage.NewObjectStorageProvider(cfg.ToProviderConfig())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	readerCfg := meter_config.DefaultConfig().WithLogger(logutil.BgLogger())
+	reader := meteringreader.NewMeteringReader(provider, readerCfg)
+	return reader, nil
+}
+
+func getMeteringTimeRange(info *importer.JobInfo, loc *time.Location) (time.Time, time.Time, error) {
+	start, err := info.CreateTime.GoTime(loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	end := time.Now()
+	if !info.EndTime.IsZero() {
+		end, err = info.EndTime.GoTime(loc)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	}
+	if end.Before(start) {
+		start, end = end, start
+	}
+	start = start.Truncate(dxfmetering.FlushInterval)
+	end = end.Truncate(dxfmetering.FlushInterval)
+	return start, end, nil
+}
+
+func collectMeteringItemsForTask(
+	ctx context.Context,
+	reader *meteringreader.MeteringReader,
+	taskID int64,
+	startTime, endTime time.Time,
+) ([]meteringItem, error) {
+	items := make([]meteringItem, 0)
+	step := dxfmetering.FlushInterval
+	for ts := startTime; !ts.After(endTime); ts = ts.Add(step) {
+		timestamp := ts.Unix()
+		if _, err := reader.ListFilesByTimestamp(ctx, timestamp); err != nil {
+			continue
+		}
+		categories, err := reader.GetCategories(ctx, timestamp)
+		if err != nil {
+			return nil, err
+		}
+		if len(categories) == 0 {
+			continue
+		}
+		for _, category := range categories {
+			files, err := reader.GetFilesByCategory(ctx, timestamp, category)
+			if err != nil {
+				return nil, err
+			}
+			for _, filePath := range files {
+				meteringData, err := reader.ReadFile(ctx, filePath)
+				if err != nil {
+					return nil, err
+				}
+				for _, data := range meteringData.Data {
+					if parseInt64Field(data, "task_id") != taskID {
+						continue
+					}
+					items = append(items, meteringItem{
+						timestamp:          meteringData.Timestamp,
+						getRequests:        parseInt64Field(data, "get_requests"),
+						putRequests:        parseInt64Field(data, "put_requests"),
+						objStoreReadBytes:  parseInt64Field(data, "obj_store_read_bytes"),
+						objStoreWriteBytes: parseInt64Field(data, "obj_store_write_bytes"),
+						clusterReadBytes:   parseInt64Field(data, "cluster_read_bytes"),
+						clusterWriteBytes:  parseInt64Field(data, "cluster_write_bytes"),
+						rowCount:           parseInt64Field(data, dxfmetering.RowCountField),
+						dataKVBytes:        parseInt64Field(data, dxfmetering.DataKVBytesField),
+						indexKVBytes:       parseInt64Field(data, dxfmetering.IndexKVBytesField),
+						requiredSlots:      parseInt64Field(data, dxfmetering.RequiredSlotsField),
+						maxNodeCount:       parseInt64Field(data, dxfmetering.MaxNodeCountField),
+						durationSeconds:    parseInt64Field(data, dxfmetering.DurationSecondsField),
+					})
+				}
+			}
+		}
+	}
+	return items, nil
+}
+
+func parseInt64Field(data map[string]any, key string) int64 {
+	if data == nil {
+		return 0
+	}
+	val, ok := data[key]
+	if !ok || val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case uint64:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case gjson.Number:
+		iv, err := v.Int64()
+		if err == nil {
+			return iv
+		}
+	case string:
+		if iv, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return iv
+		}
+	}
+	return 0
+}
+
+func readBaseManifest(ctx context.Context, baseURI, manifestPath string) (*importinto.BaseManifest, error) {
+	store, err := importer.GetSortStore(ctx, baseURI)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return importinto.ReadBaseManifest(ctx, store, manifestPath)
+}
+
+func readChangedRegionsManifest(ctx context.Context, baseURI, manifestPath string) (*importinto.ChangedRegionsManifest, error) {
+	store, err := importer.GetSortStore(ctx, baseURI)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return importinto.ReadChangedRegionsManifest(ctx, store, manifestPath)
+}
+
+func toBinaryJSON(values []string) (types.BinaryJSON, error) {
+	if values == nil {
+		values = []string{}
+	}
+	bytes, err := gjson.Marshal(values)
+	if err != nil {
+		return types.BinaryJSON{}, errors.Trace(err)
+	}
+	var bj types.BinaryJSON
+	if err := bj.UnmarshalJSON(bytes); err != nil {
+		return types.BinaryJSON{}, err
+	}
+	return bj, nil
+}
+
+func parseBaseID(baseID string) (int64, bool) {
+	if !strings.HasPrefix(baseID, "base-") {
+		return 0, false
+	}
+	jobID, err := strconv.ParseInt(strings.TrimPrefix(baseID, "base-"), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return jobID, true
 }
 
 // tryFillViewColumnType fill the columns type info of a view.

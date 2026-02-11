@@ -3103,6 +3103,11 @@ const (
 	ShowCreateResourceGroup
 	ShowImportJobs
 	ShowImportGroups
+	ShowImportBases
+	ShowImportRegions
+	ShowImportChangedRegions
+	ShowImportCost
+	ShowImportMetering
 	ShowCreateProcedure
 	ShowBinlogStatus
 	ShowReplicaStatus
@@ -3162,6 +3167,7 @@ type ShowStmt struct {
 	ShowGroupKey string // Used for `SHOW IMPORT GROUP <GROUP_KEY>` syntax
 
 	ImportJobID *int64 // Used for `SHOW IMPORT JOB <ID>` syntax
+	ImportBaseID string // Used for `SHOW IMPORT REGIONS BASE <ID>` syntax
 
 	DistributionJobID *int64 // Used for `SHOW DISTRIBUTION JOB <ID>` syntax
 }
@@ -3389,6 +3395,27 @@ func (n *ShowStmt) Restore(ctx *format.RestoreCtx) error {
 		} else {
 			ctx.WriteKeyWord("IMPORT GROUPS")
 			restoreShowLikeOrWhereOpt()
+		}
+	case ShowImportBases:
+		ctx.WriteKeyWord("IMPORT BASES")
+		restoreShowLikeOrWhereOpt()
+	case ShowImportRegions:
+		ctx.WriteKeyWord("IMPORT REGIONS BASE ")
+		ctx.WriteString(n.ImportBaseID)
+	case ShowImportChangedRegions:
+		ctx.WriteKeyWord("IMPORT CHANGED REGIONS JOB ")
+		if n.ImportJobID != nil {
+			ctx.WritePlainf("%d", *n.ImportJobID)
+		}
+	case ShowImportCost:
+		ctx.WriteKeyWord("IMPORT COST JOB ")
+		if n.ImportJobID != nil {
+			ctx.WritePlainf("%d", *n.ImportJobID)
+		}
+	case ShowImportMetering:
+		ctx.WriteKeyWord("IMPORT METERING JOB ")
+		if n.ImportJobID != nil {
+			ctx.WritePlainf("%d", *n.ImportJobID)
 		}
 	case ShowDistributionJobs:
 		if n.DistributionJobID != nil {
