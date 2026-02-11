@@ -115,6 +115,10 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 	deltaRangeKnown := len(deltaStart) > 0 || len(deltaEnd) > 0
 
 	if stMeta.BaseManifestPath == "" {
+		// Rationale: when explicit base manifest is unavailable, we intentionally
+		// choose correctness over selectivity by marking the whole keyspace as
+		// changed. This guarantees region rebuild won't miss base rows, and keeps
+		// delta mode safe for first-time or recovered jobs.
 		logger.Warn("base manifest missing, fallback to remote coprocessor scan on S3 SSTs")
 		changedRegions := make([]ChangedRegionMeta, 0, 1)
 		// Fallback to full range so rebuild does not miss any base data.

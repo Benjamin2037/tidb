@@ -724,6 +724,10 @@ func (sch *importScheduler) finishJob(ctx context.Context, logger *zap.Logger,
 	return handle.RunWithRetry(ctx, scheduler.RetrySQLTimes, backoffer, logger,
 		func(ctx context.Context) (bool, error) {
 			return true, taskManager.WithNewTxn(ctx, func(se sessionctx.Context) error {
+				// Rationale: persist import summary and table stats delta in the same
+				// transaction, so downstream observability (SHOW IMPORT/job summary)
+				// and auto-analyze trigger decision are based on a single committed
+				// view after the task is fully finished.
 				txn, err2 := se.Txn(true)
 				if err2 != nil {
 					return err2
@@ -736,7 +740,6 @@ func (sch *importScheduler) finishJob(ctx context.Context, logger *zap.Logger,
 							Delta:    importedRows,
 							Count:    importedRows,
 							InitTime: time.Now(),
-							TableID:  taskMeta.Plan.TableInfo.ID,
 						},
 						TableID: taskMeta.Plan.TableInfo.ID,
 					}

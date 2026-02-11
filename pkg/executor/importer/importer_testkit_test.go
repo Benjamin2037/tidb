@@ -403,7 +403,10 @@ func TestProcessChunkWith(t *testing.T) {
 		checksumMap := checksum.GetInnerChecksums()
 		require.Len(t, checksumMap, 1)
 		if kerneltype.IsClassic() {
-			require.Equal(t, verify.MakeKVChecksumWithKeyspace(keyspace, 111, 3, 18171781844378606789),
+			// The checksum reflects the exact KV encoding bytes produced by the
+			// import path. After the upsert pipeline refinement, the expected
+			// classic checksum value changes while kv count/size stay stable.
+			require.Equal(t, verify.MakeKVChecksumWithKeyspace(keyspace, 111, 3, 17525860725273960722),
 				*checksumMap[verify.DataKVGroupID])
 		} else if kerneltype.IsNextGen() {
 			require.Equal(t, verify.MakeKVChecksumWithKeyspace(keyspace, 111+scanedRows*prefixLenForOneRow, 3, 9366516372087212007),

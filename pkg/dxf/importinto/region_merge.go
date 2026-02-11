@@ -153,6 +153,9 @@ func (e *regionMergeStepExecutor) RunSubtask(ctx context.Context, subtask *proto
 
 	if len(changedRegions.Regions) == 0 {
 		if !useRemoteS3Base {
+			// Rationale: no touched ranges means delta introduces no effective
+			// changes. Reuse the previous manifest content and only rotate
+			// version metadata to avoid unnecessary rewrite/ingest work.
 			out := *baseManifest
 			out.BaseID = stMeta.OutputBaseID
 			out.BaseURI = stMeta.BaseURI
