@@ -270,6 +270,44 @@ func TestGetAndCancelJob(t *testing.T) {
 	require.Equal(t, jobID2, jobs[1].ID)
 }
 
+func TestUpdateJobSummary(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	ctx := context.Background()
+	conn := tk.Session().GetSQLExecutor()
+
+	jobInfo := &importer.JobInfo{
+		TableSchema: "test",
+		TableName:   "t",
+		TableID:     1,
+		CreatedBy:   "user-for-test@%",
+		Parameters: importer.ImportParameters{
+			Format: importer.DataFormatCSV,
+			Options: map[string]any{
+				"skip_rows": float64(1),
+			},
+		},
+		SourceFileSize: 123,
+		Status:         "pending",
+	}
+	jobID, err := importer.CreateJob(ctx, conn, jobInfo.TableSchema, jobInfo.TableName, jobInfo.TableID,
+		jobInfo.CreatedBy, "", &jobInfo.Parameters, jobInfo.SourceFileSize)
+	require.NoError(t, err)
+
+	summary := &importer.Summary{ImportedRows: 321}
+	require.NoError(t, importer.UpdateJobSummary(ctx, conn, jobID, summary))
+
+	gotJob, err := importer.GetJob(ctx, conn, jobID, jobInfo.CreatedBy, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(321), gotJob.Summary.ImportedRows)
+	require.Equal(t, "pending", gotJob.Status)
+
+	require.NoError(t, importer.UpdateJobSummary(ctx, conn, jobID, nil))
+	gotJob, err = importer.GetJob(ctx, conn, jobID, jobInfo.CreatedBy, false)
+	require.NoError(t, err)
+	require.NotNil(t, gotJob.Summary)
+}
+
 func TestJobInfo_CanCancel(t *testing.T) {
 	jobInfo := &importer.JobInfo{}
 	for _, c := range []struct {

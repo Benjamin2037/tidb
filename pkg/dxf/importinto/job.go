@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/tidb/pkg/executor/importer"
 	"github.com/pingcap/tidb/pkg/keyspace"
 	"github.com/pingcap/tidb/pkg/kv"
+	"github.com/pingcap/tidb/pkg/lightning/common"
 	"github.com/pingcap/tidb/pkg/meta/model"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
 	"github.com/pingcap/tidb/pkg/sessionctx"
@@ -56,12 +57,49 @@ func SubmitStandaloneTask(ctx context.Context, plan *importer.Plan, stmt string,
 	if err != nil {
 		return 0, nil, err
 	}
-	return doSubmitTask(ctx, plan, stmt, serverInfo, chunkMap)
+	return submitTaskFn(ctx, plan, stmt, serverInfo, chunkMap)
 }
 
 // SubmitTask submits a task to the distribute framework that runs on all managed nodes.
 func SubmitTask(ctx context.Context, plan *importer.Plan, stmt string) (int64, *proto.TaskBase, error) {
-	return doSubmitTask(ctx, plan, stmt, nil, nil)
+	return submitTaskFn(ctx, plan, stmt, nil, nil)
+}
+
+var submitTaskFn = doSubmitTask
+
+// SubmitCompactionTask submits a background compaction task to rebuild base versions.
+// It skips the encode step by passing an empty chunk map.
+func SubmitCompactionTask(
+	ctx context.Context,
+	dbName string,
+	dbID int64,
+	tbl *model.TableInfo,
+	baseID, baseURI, targetScope, user, groupKey string,
+) (int64, *proto.TaskBase, error) {
+	if tbl == nil {
+		return 0, nil, errors.New("table info is nil")
+	}
+	plan := &importer.Plan{
+		DBName:          dbName,
+		DBID:            dbID,
+		TableInfo:       tbl,
+		User:            user,
+		GroupKey:        groupKey,
+		CloudStorageURI: baseURI,
+		BaseURI:         baseURI,
+		BaseVersion:     baseID,
+		UpsertMode:      importer.UpsertModeDelta,
+		MergeStrategy:   importer.MergeStrategyLastWriteWins,
+		Parameters: &importer.ImportParameters{
+			Options: map[string]any{"compaction": true},
+		},
+	}
+	if plan.BaseURI == "" {
+		plan.BaseURI = plan.CloudStorageURI
+	}
+	chunkMap := map[int32][]importer.Chunk{common.IndexEngineID: {}}
+	stmt := fmt.Sprintf("IMPORT INTO `%s`.`%s` /* compaction */", dbName, tbl.Name.O)
+	return submitTaskFn(ctx, plan, stmt, nil, chunkMap)
 }
 
 func doSubmitTask(ctx context.Context, plan *importer.Plan, stmt string, instance *serverinfo.ServerInfo, chunkMap map[int32][]importer.Chunk) (int64, *proto.TaskBase, error) {

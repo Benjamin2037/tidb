@@ -2999,6 +2999,16 @@ var defaultSysVars = []*SysVar{
 		vardef.CloudStorageURI.Store(val)
 		return nil
 	}},
+	{Scope: vardef.ScopeGlobal, Name: vardef.TiDBImportIntoBaseRetentionDays, Value: strconv.Itoa(vardef.DefTiDBImportIntoBaseRetentionDays), Type: vardef.TypeInt, MinValue: 0, MaxValue: 36500, SetGlobal: func(ctx context.Context, vars *SessionVars, s string) error {
+		val, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return err
+		}
+		vardef.ImportIntoBaseRetentionDays.Store(val)
+		return nil
+	}, GetGlobal: func(ctx context.Context, vars *SessionVars) (string, error) {
+		return strconv.FormatInt(vardef.ImportIntoBaseRetentionDays.Load(), 10), nil
+	}},
 	{Scope: vardef.ScopeSession, Name: vardef.TiDBConstraintCheckInPlacePessimistic, Value: BoolToOnOff(config.GetGlobalConfig().PessimisticTxn.ConstraintCheckInPlacePessimistic), Type: vardef.TypeBool,
 		SetSession: func(s *SessionVars, val string) error {
 			s.ConstraintCheckInPlacePessimistic = TiDBOptOn(val)
