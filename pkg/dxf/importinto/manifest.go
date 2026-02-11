@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -31,6 +32,9 @@ const (
 	baseManifestDirName  = "base"
 	deltaManifestDirName = "delta"
 )
+
+// ErrBaseManifestNotFound indicates the base manifest does not exist on external storage.
+var ErrBaseManifestNotFound = errors.New("base manifest not found")
 
 // BaseManifest records the base version metadata stored on external storage.
 type BaseManifest struct {
@@ -79,6 +83,59 @@ func BaseManifestPath(baseID string) string {
 // ChangedRegionsPath returns the default external storage path for a delta changed regions manifest.
 func ChangedRegionsPath(jobID int64) string {
 	return path.Join(deltaManifestDirName, strconv.FormatInt(jobID, 10), changedRegionsName)
+}
+
+// ParseBaseID parses base id in form "base-<job_id>".
+func ParseBaseID(baseID string) (int64, bool) {
+	if !strings.HasPrefix(baseID, "base-") {
+		return 0, false
+	}
+	jobID, err := strconv.ParseInt(strings.TrimPrefix(baseID, "base-"), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return jobID, true
+}
+
+// ResolveLatestBaseManifest walks storage to find the latest base manifest.
+func ResolveLatestBaseManifest(ctx context.Context, store storeapi.Storage) (string, string, error) {
+	var (
+		bestID       string
+		bestPath     string
+		bestJobID    int64
+		bestJobFound bool
+	)
+	err := store.WalkDir(ctx, &storeapi.WalkOption{SubDir: baseManifestDirName}, func(p string, _ int64) error {
+		if !strings.HasSuffix(p, baseManifestName) {
+			return nil
+		}
+		parts := strings.Split(p, "/")
+		if len(parts) < 2 {
+			return nil
+		}
+		id := parts[1]
+		if jobID, ok := ParseBaseID(id); ok {
+			if !bestJobFound || jobID > bestJobID {
+				bestJobID = jobID
+				bestJobFound = true
+				bestID = id
+				bestPath = p
+			}
+			return nil
+		}
+		if bestID == "" && !bestJobFound {
+			bestID = id
+			bestPath = p
+		}
+		return nil
+	})
+	if err != nil {
+		return "", "", errors.Trace(err)
+	}
+	if bestID == "" || bestPath == "" {
+		return "", "", ErrBaseManifestNotFound
+	}
+	return bestID, bestPath, nil
 }
 
 // WriteBaseManifest writes base manifest JSON to external storage.

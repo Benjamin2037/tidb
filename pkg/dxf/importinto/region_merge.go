@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,28 +132,40 @@ func (e *regionMergeStepExecutor) RunSubtask(ctx context.Context, subtask *proto
 		e.GetMeterRecorder().MergeObjStoreAccess(accessRecBase)
 	}()
 
-	baseManifest, err := ReadBaseManifest(ctx, baseStore, stMeta.BaseManifestPath)
-	if err != nil {
-		return errors.Trace(err)
+	useRemoteS3Base := stMeta.BaseManifestPath == ""
+	var baseManifest *BaseManifest
+	if !useRemoteS3Base {
+		baseManifest, err = ReadBaseManifest(ctx, baseStore, stMeta.BaseManifestPath)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	} else {
+		logger.Warn("base manifest missing, fallback to remote coprocessor scan on S3 SSTs")
 	}
 
 	changedRegions, err := ReadChangedRegionsManifest(ctx, deltaStore, stMeta.ChangedRegionsPath)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if changedRegions.BaseID != "" && changedRegions.BaseID != baseManifest.BaseID {
+	if !useRemoteS3Base && changedRegions.BaseID != "" && changedRegions.BaseID != baseManifest.BaseID {
 		return errors.Errorf("base id mismatch: changed regions %s, base manifest %s", changedRegions.BaseID, baseManifest.BaseID)
 	}
 
 	if len(changedRegions.Regions) == 0 {
-		out := *baseManifest
-		out.BaseID = stMeta.OutputBaseID
-		out.BaseURI = stMeta.BaseURI
-		out.CreateTime = time.Now().UTC()
-		if err := WriteBaseManifest(ctx, baseStore, stMeta.OutputManifestPath, &out); err != nil {
-			return errors.Trace(err)
+		if !useRemoteS3Base {
+			out := *baseManifest
+			out.BaseID = stMeta.OutputBaseID
+			out.BaseURI = stMeta.BaseURI
+			out.CreateTime = time.Now().UTC()
+			if err := WriteBaseManifest(ctx, baseStore, stMeta.OutputManifestPath, &out); err != nil {
+				return errors.Trace(err)
+			}
+			return nil
 		}
-		return nil
+		changedRegions.Regions = append(changedRegions.Regions, ChangedRegionMeta{
+			StartKey: "",
+			EndKey:   "",
+		})
 	}
 
 	encoder, err := e.tableImporter.GetKVEncoderForDupResolve()
@@ -188,64 +201,102 @@ func (e *regionMergeStepExecutor) RunSubtask(ctx context.Context, subtask *proto
 		return err
 	}
 
-	outputRegions := make([]BaseRegionMeta, 0, len(baseManifest.Regions)+len(changedRanges))
-	covered := make([]bool, len(changedRanges))
+	outputRegions := make([]BaseRegionMeta, 0, len(changedRanges))
+	var totalRows, totalDataBytes, totalIndexBytes uint64
 
-	for _, region := range baseManifest.Regions {
-		regionStart, err := decodeHexKey(region.StartKey)
+	if useRemoteS3Base {
+		resolvedBaseID, baseDataFiles, err := collectBaseDataFiles(ctx, baseStore, stMeta.BaseID)
 		if err != nil {
-			return errors.Annotate(err, "decode base region start key")
+			return err
 		}
-		regionEnd, err := decodeHexKey(region.EndKey)
-		if err != nil {
-			return errors.Annotate(err, "decode base region end key")
+		if stMeta.BaseID == "" && resolvedBaseID != "" {
+			stMeta.BaseID = resolvedBaseID
 		}
-		needRebuild := false
-		for i, cr := range changedRanges {
-			if rangesOverlap(regionStart, regionEnd, cr.Start, cr.End) {
-				needRebuild = true
-				covered[i] = true
+		for _, cr := range changedRanges {
+			rebuilt, dataBytes, indexBytes, rowCount, err := e.rebuildRegion(
+				ctx, baseStore, deltaStore, encoder,
+				baseDataFiles, stMeta.DeltaDataFiles,
+				cr.Start, cr.End,
+				cr.StartHex, cr.EndHex,
+				dataKVMemSize, perIndexMemSize,
+				dataBlockSize, indexBlockSize,
+				colTypes, colIDsByIdx, pkCols,
+				stMeta.OutputBaseID,
+			)
+			if err != nil {
+				return err
 			}
+			outputRegions = append(outputRegions, rebuilt)
+			totalRows += rowCount
+			totalDataBytes += dataBytes
+			totalIndexBytes += indexBytes
 		}
-		if !needRebuild {
-			outputRegions = append(outputRegions, region)
-			continue
+	} else {
+		outputRegions = make([]BaseRegionMeta, 0, len(baseManifest.Regions)+len(changedRanges))
+		covered := make([]bool, len(changedRanges))
+
+		for _, region := range baseManifest.Regions {
+			regionStart, err := decodeHexKey(region.StartKey)
+			if err != nil {
+				return errors.Annotate(err, "decode base region start key")
+			}
+			regionEnd, err := decodeHexKey(region.EndKey)
+			if err != nil {
+				return errors.Annotate(err, "decode base region end key")
+			}
+			needRebuild := false
+			for i, cr := range changedRanges {
+				if rangesOverlap(regionStart, regionEnd, cr.Start, cr.End) {
+					needRebuild = true
+					covered[i] = true
+				}
+			}
+			if !needRebuild {
+				outputRegions = append(outputRegions, region)
+				continue
+			}
+
+			rebuilt, dataBytes, indexBytes, rowCount, err := e.rebuildRegion(
+				ctx, baseStore, deltaStore, encoder,
+				region.DataFiles, stMeta.DeltaDataFiles,
+				regionStart, regionEnd,
+				region.StartKey, region.EndKey,
+				dataKVMemSize, perIndexMemSize,
+				dataBlockSize, indexBlockSize,
+				colTypes, colIDsByIdx, pkCols,
+				stMeta.OutputBaseID,
+			)
+			if err != nil {
+				return err
+			}
+			outputRegions = append(outputRegions, rebuilt)
+			totalRows += rowCount
+			totalDataBytes += dataBytes
+			totalIndexBytes += indexBytes
 		}
 
-		rebuilt, _, _, _, err := e.rebuildRegion(
-			ctx, baseStore, deltaStore, encoder,
-			region.DataFiles, stMeta.DeltaDataFiles,
-			regionStart, regionEnd,
-			region.StartKey, region.EndKey,
-			dataKVMemSize, perIndexMemSize,
-			dataBlockSize, indexBlockSize,
-			colTypes, colIDsByIdx, pkCols,
-			stMeta.OutputBaseID,
-		)
-		if err != nil {
-			return err
+		for i, cr := range changedRanges {
+			if covered[i] {
+				continue
+			}
+			rebuilt, dataBytes, indexBytes, rowCount, err := e.rebuildRegion(
+				ctx, baseStore, deltaStore, encoder,
+				nil, stMeta.DeltaDataFiles,
+				cr.Start, cr.End,
+				cr.StartHex, cr.EndHex,
+				dataKVMemSize, perIndexMemSize,
+				dataBlockSize, indexBlockSize,
+				colTypes, colIDsByIdx, pkCols,
+				stMeta.OutputBaseID,
+			)
+			if err != nil {
+				return err
+			}
+			outputRegions = append(outputRegions, rebuilt)
+			totalRows += rowCount
+			totalDataBytes += dataBytes
+			totalIndexBytes += indexBytes
 		}
-		outputRegions = append(outputRegions, rebuilt)
-	}
-
-	for i, cr := range changedRanges {
-		if covered[i] {
-			continue
-		}
-		rebuilt, _, _, _, err := e.rebuildRegion(
-			ctx, baseStore, deltaStore, encoder,
-			nil, stMeta.DeltaDataFiles,
-			cr.Start, cr.End,
-			cr.StartHex, cr.EndHex,
-			dataKVMemSize, perIndexMemSize,
-			dataBlockSize, indexBlockSize,
-			colTypes, colIDsByIdx, pkCols,
-			stMeta.OutputBaseID,
-		)
-		if err != nil {
-			return err
-		}
-		outputRegions = append(outputRegions, rebuilt)
 	}
 
 	sort.Slice(outputRegions, func(i, j int) bool {
@@ -257,14 +308,22 @@ func (e *regionMergeStepExecutor) RunSubtask(ctx context.Context, subtask *proto
 		return bytes.Compare(li, lj) < 0
 	})
 
+	rowCount := totalRows
+	dataBytes := totalDataBytes
+	indexBytes := totalIndexBytes
+	if baseManifest != nil {
+		rowCount = baseManifest.RowCount
+		dataBytes = baseManifest.DataBytes
+		indexBytes = baseManifest.IndexBytes
+	}
 	out := &BaseManifest{
-		TableID:    baseManifest.TableID,
+		TableID:    e.taskMeta.Plan.TableInfo.ID,
 		BaseID:     stMeta.OutputBaseID,
 		BaseURI:    stMeta.BaseURI,
 		CreateTime: time.Now().UTC(),
-		RowCount:   baseManifest.RowCount,
-		DataBytes:  baseManifest.DataBytes,
-		IndexBytes: baseManifest.IndexBytes,
+		RowCount:   rowCount,
+		DataBytes:  dataBytes,
+		IndexBytes: indexBytes,
 		Regions:    outputRegions,
 	}
 	if err := WriteBaseManifest(ctx, baseStore, stMeta.OutputManifestPath, out); err != nil {
@@ -628,6 +687,76 @@ func extractIndexFiles(summaries []*external.WriterSummary) ([]string, []string)
 		}
 	}
 	return indexFiles, statFiles
+}
+
+func collectBaseDataFiles(ctx context.Context, store storeapi.Storage, baseID string) (string, []string, error) {
+	if baseID != "" {
+		files, err := listBaseDataFiles(ctx, store, path.Join(baseManifestDirName, baseID))
+		if err != nil {
+			return baseID, nil, err
+		}
+		if len(files) == 0 {
+			return baseID, nil, errors.New("base data files not found")
+		}
+		return baseID, files, nil
+	}
+
+	filesByBase := make(map[string][]string)
+	var (
+		bestID       string
+		bestJobID    int64
+		bestJobFound bool
+	)
+	err := store.WalkDir(ctx, &storeapi.WalkOption{SubDir: baseManifestDirName}, func(p string, _ int64) error {
+		id, ok := parseBaseIDFromDataPath(p)
+		if !ok {
+			return nil
+		}
+		filesByBase[id] = append(filesByBase[id], p)
+		if jobID, ok := ParseBaseID(id); ok {
+			if !bestJobFound || jobID > bestJobID {
+				bestJobFound = true
+				bestJobID = jobID
+				bestID = id
+			}
+		} else if bestID == "" && !bestJobFound {
+			bestID = id
+		}
+		return nil
+	})
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	if bestID == "" {
+		return "", nil, errors.New("base data files not found")
+	}
+	return bestID, filesByBase[bestID], nil
+}
+
+func listBaseDataFiles(ctx context.Context, store storeapi.Storage, subdir string) ([]string, error) {
+	files := make([]string, 0, 64)
+	err := store.WalkDir(ctx, &storeapi.WalkOption{SubDir: subdir}, func(p string, _ int64) error {
+		if _, ok := parseBaseIDFromDataPath(p); !ok {
+			return nil
+		}
+		files = append(files, p)
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return files, nil
+}
+
+func parseBaseIDFromDataPath(p string) (string, bool) {
+	parts := strings.Split(p, "/")
+	if len(parts) < 6 {
+		return "", false
+	}
+	if parts[0] != baseManifestDirName || parts[5] != external.DataKVGroup {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func pathForOutputRegion(baseID, startHex, endHex string) string {

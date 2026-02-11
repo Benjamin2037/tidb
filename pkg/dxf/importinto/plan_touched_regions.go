@@ -102,11 +102,6 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 		e.GetMeterRecorder().MergeObjStoreAccess(accessRecBase)
 	}()
 
-	baseManifest, err := ReadBaseManifest(ctx, baseStore, stMeta.BaseManifestPath)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
 	deltaStart, err := decodeHexKey(stMeta.DeltaStartKey)
 	if err != nil {
 		return errors.Annotate(err, "decode delta start key")
@@ -117,6 +112,28 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 	}
 	deltaRangeKnown := len(deltaStart) > 0 || len(deltaEnd) > 0
 
+	if stMeta.BaseManifestPath == "" {
+		logger.Warn("base manifest missing, fallback to remote coprocessor scan on S3 SSTs")
+		changedRegions := make([]ChangedRegionMeta, 0, 1)
+		// fall back to full range to keep base data consistent
+		changedRegions = append(changedRegions, ChangedRegionMeta{
+			StartKey: "",
+			EndKey:   "",
+		})
+		out := &ChangedRegionsManifest{
+			BaseID:  stMeta.BaseID,
+			JobID:   e.taskMeta.JobID,
+			Regions: changedRegions,
+		}
+		if err := WriteChangedRegionsManifest(ctx, deltaStore, stMeta.ChangedRegionsPath, out); err != nil {
+			return errors.Trace(err)
+		}
+		return nil
+	}
+	baseManifest, err := ReadBaseManifest(ctx, baseStore, stMeta.BaseManifestPath)
+	if err != nil {
+		return errors.Trace(err)
+	}
 	changedRegions := make([]ChangedRegionMeta, 0)
 	for _, region := range baseManifest.Regions {
 		regionStart, err := decodeHexKey(region.StartKey)
@@ -141,7 +158,6 @@ func (e *planTouchedRegionsStepExecutor) RunSubtask(ctx context.Context, subtask
 			})
 		}
 	}
-
 	if len(changedRegions) == 0 && deltaRangeKnown {
 		changedRegions = append(changedRegions, ChangedRegionMeta{
 			StartKey: stMeta.DeltaStartKey,
