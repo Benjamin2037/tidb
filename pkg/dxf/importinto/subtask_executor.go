@@ -145,7 +145,7 @@ func (p *postProcessStepExecutor) postProcess(ctx context.Context, subtaskMeta *
 		zap.Stringer("final", &finalChecksum))
 	if subtaskMeta.TooManyConflictsFromIndex {
 		callLog.Info("too many conflicts from index, skip verify checksum, as the checksum of deleted rows may be inaccurate")
-		return nil
+		return p.maybeWriteFullBaseManifest(ctx, logger)
 	}
 
 	ctx = util.WithInternalSourceType(ctx, kv.InternalDistTask)
@@ -154,7 +154,7 @@ func (p *postProcessStepExecutor) postProcess(ctx context.Context, subtaskMeta *
 		mgr := local.NewTiKVChecksumManagerForImportInto(p.store, p.taskID,
 			uint(plan.DistSQLScanConcurrency), bfWeight, resourcegroup.DefaultResourceGroupName)
 		defer mgr.Close()
-		return importer.VerifyChecksum(ctx, plan, finalChecksum, logger,
+		if err := importer.VerifyChecksum(ctx, plan, finalChecksum, logger,
 			func() (*local.RemoteChecksum, error) {
 				ctxWithLogger := logutil.WithLogger(ctx, logger)
 				return mgr.Checksum(ctxWithLogger, &checkpoints.TidbTableInfo{
@@ -163,10 +163,13 @@ func (p *postProcessStepExecutor) postProcess(ctx context.Context, subtaskMeta *
 					Core: plan.TableInfo,
 				})
 			},
-		)
+		); err != nil {
+			return err
+		}
+		return p.maybeWriteFullBaseManifest(ctx, logger)
 	}
 
-	return p.taskTbl.WithNewSession(func(se sessionctx.Context) error {
+	err = p.taskTbl.WithNewSession(func(se sessionctx.Context) error {
 		err = importer.VerifyChecksum(ctx, plan, finalChecksum, logger,
 			func() (*local.RemoteChecksum, error) {
 				return importer.RemoteChecksumTableBySQL(ctx, se, plan, logger)
@@ -185,4 +188,8 @@ func (p *postProcessStepExecutor) postProcess(ctx context.Context, subtaskMeta *
 		}
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	return p.maybeWriteFullBaseManifest(ctx, logger)
 }
