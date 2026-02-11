@@ -595,6 +595,7 @@ func (e *writeAndIngestStepExecutor) Init(ctx context.Context) error {
 	}
 	tableImporter.Backend().SetWorkerConcurrency(int(e.GetResource().CPU.Capacity()))
 	e.tableImporter = tableImporter
+	e.applySLOGuardRateLimit()
 	return nil
 }
 
@@ -604,6 +605,7 @@ func (e *writeAndIngestStepExecutor) RunSubtask(ctx context.Context, subtask *pr
 	if err != nil {
 		return errors.Trace(err)
 	}
+	e.applySLOGuardRateLimit()
 
 	storeURI := e.tableImporter.CloudStorageURI
 	if sm.StoreURI != "" {
@@ -719,6 +721,22 @@ func (e *writeAndIngestStepExecutor) onFinished(ctx context.Context, subtask *pr
 func (e *writeAndIngestStepExecutor) Cleanup(_ context.Context) (err error) {
 	e.logger.Info("cleanup subtask env")
 	return e.tableImporter.Close()
+}
+
+func (e *writeAndIngestStepExecutor) applySLOGuardRateLimit() {
+	if e.tableImporter == nil {
+		return
+	}
+	limit := effectiveApplyRateLimit(e.taskMeta.JobID, 0)
+	if limit <= 0 {
+		e.tableImporter.Backend().UpdateWriteSpeedLimit(0)
+		return
+	}
+	maxInt := int64(int(^uint(0) >> 1))
+	if int64(limit) > maxInt {
+		limit = config.ByteSize(maxInt)
+	}
+	e.tableImporter.Backend().UpdateWriteSpeedLimit(int(limit))
 }
 
 type postProcessStepExecutor struct {

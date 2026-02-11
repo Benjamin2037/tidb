@@ -3108,6 +3108,7 @@ const (
 	ShowImportChangedRegions
 	ShowImportCost
 	ShowImportMetering
+	ShowImportIntoSLOGuard
 	ShowCreateProcedure
 	ShowBinlogStatus
 	ShowReplicaStatus
@@ -3415,6 +3416,12 @@ func (n *ShowStmt) Restore(ctx *format.RestoreCtx) error {
 	case ShowImportMetering:
 		ctx.WriteKeyWord("IMPORT METERING JOB ")
 		if n.ImportJobID != nil {
+			ctx.WritePlainf("%d", *n.ImportJobID)
+		}
+	case ShowImportIntoSLOGuard:
+		ctx.WriteKeyWord("IMPORT SLO GUARD")
+		if n.ImportJobID != nil {
+			ctx.WriteKeyWord(" JOB ")
 			ctx.WritePlainf("%d", *n.ImportJobID)
 		}
 	case ShowDistributionJobs:

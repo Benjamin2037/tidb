@@ -3888,6 +3888,39 @@ func (n *ImportIntoActionStmt) Restore(ctx *format.RestoreCtx) error {
 	return nil
 }
 
+// AlterImportIntoSLOGuardStmt represents ALTER IMPORT SLO GUARD statement.
+type AlterImportIntoSLOGuardStmt struct {
+	stmtNode
+
+	JobID   *int64
+	Options []*LoadDataOpt
+}
+
+func (n *AlterImportIntoSLOGuardStmt) Accept(v Visitor) (Node, bool) {
+	newNode, _ := v.Enter(n)
+	return v.Leave(newNode)
+}
+
+func (n *AlterImportIntoSLOGuardStmt) Restore(ctx *format.RestoreCtx) error {
+	ctx.WriteKeyWord("ALTER IMPORT SLO GUARD")
+	if n.JobID != nil {
+		ctx.WriteKeyWord(" JOB ")
+		ctx.WritePlainf("%d", *n.JobID)
+	}
+	if len(n.Options) > 0 {
+		ctx.WriteKeyWord(" WITH ")
+		for i, opt := range n.Options {
+			if i > 0 {
+				ctx.WritePlain(", ")
+			}
+			if err := opt.Restore(ctx); err != nil {
+				return errors.Annotate(err, "An error occurred while restore AlterImportIntoSLOGuardStmt option")
+			}
+		}
+	}
+	return nil
+}
+
 // CancelDistributionJobStmt represent CANCEL DISTRIBUTION JOB statement.
 type CancelDistributionJobStmt struct {
 	stmtNode

@@ -700,6 +700,18 @@ const (
 		KEY idx_group_key(group_key),
 		KEY (status));`
 
+	// CreateTiDBImportSLOGuardTable stores SLO guard configuration for IMPORT INTO.
+	CreateTiDBImportSLOGuardTable = `CREATE TABLE IF NOT EXISTS mysql.tidb_import_slo_guard (
+		job_id bigint(64) NOT NULL DEFAULT 0,
+		config JSON DEFAULT NULL,
+		enable tinyint(1) NOT NULL DEFAULT 0,
+		pause_threshold varchar(32) NOT NULL DEFAULT '10ms',
+		slow_apply_rate_limit_mb_per_sec bigint(64) NOT NULL DEFAULT 64,
+		updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+		updated_by VARCHAR(300) NOT NULL DEFAULT '',
+		PRIMARY KEY (job_id)
+	);`
+
 	// CreateTiDBPITRIDMapTable is a table that records the id map from upstream to downstream for PITR.
 	// set restore id default to 0 to make it compatible for old BR tool to restore to a new TiDB, such case should be
 	// rare though.

@@ -1051,6 +1051,7 @@ import (
 	CallStmt                   "CALL statement"
 	ImportIntoStmt             "IMPORT INTO statement"
 	ImportFromSelectStmt       "SELECT statement of IMPORT INTO"
+	AlterImportIntoSLOGuardStmt "ALTER IMPORT SLO GUARD statement"
 	KillStmt                   "Kill statement"
 	LoadDataStmt               "Load data statement"
 	LoadStatsStmt              "Load statistic statement"
@@ -1160,6 +1161,8 @@ import (
 	ColumnNameListOpt                      "column name list opt"
 	IdentList                              "identifier list"
 	IdentListWithParenOpt                  "column name list opt with parentheses"
+	ImportIntoSLOGuardJobOpt               "IMPORT SLO GUARD job option"
+	ImportIntoSLOGuardTarget               "IMPORT SLO GUARD target"
 	ColumnNameOrUserVarListOpt             "column name or user vairiabe list opt"
 	ColumnNameOrUserVarListOptWithBrackets "column name or user variable list opt with brackets"
 	ColumnSetValueList                     "insert statement set value by column name list"
@@ -6314,6 +6317,35 @@ CancelImportStmt:
 			Tp:    ast.ImportIntoCancel,
 			JobID: $4.(int64),
 		}
+	}
+
+AlterImportIntoSLOGuardStmt:
+	"ALTER" "IMPORT" ImportIntoSLOGuardTarget ImportIntoSLOGuardJobOpt "WITH" LoadDataOptionList
+	{
+		$$ = &ast.AlterImportIntoSLOGuardStmt{
+			JobID:   $4.(*int64),
+			Options: $6.([]*ast.LoadDataOpt),
+		}
+	}
+
+ImportIntoSLOGuardTarget:
+	identifier identifier
+	{
+		if strings.ToLower($1) != "slo" || strings.ToLower($2) != "guard" {
+			yylex.AppendError(yylex.Errorf("expect SLO GUARD"))
+			return 1
+		}
+		$$ = nil
+	}
+
+ImportIntoSLOGuardJobOpt:
+	{
+		$$ = (*int64)(nil)
+	}
+|	"JOB" Int64Num
+	{
+		v := $2.(int64)
+		$$ = &v
 	}
 
 Expression:
@@ -12083,6 +12115,13 @@ ShowStmt:
 			ImportJobID: &v,
 		}
 	}
+|	"SHOW" "IMPORT" ImportIntoSLOGuardTarget ImportIntoSLOGuardJobOpt
+	{
+		$$ = &ast.ShowStmt{
+			Tp:          ast.ShowImportIntoSLOGuard,
+			ImportJobID: $4.(*int64),
+		}
+	}
 |	"SHOW" "DISTRIBUTION" "JOB" Int64Num
 	{
 		v := $4.(int64)
@@ -12786,6 +12825,7 @@ Statement:
 |	NonTransactionalDMLStmt
 |	OptimizeTableStmt
 |	CancelImportStmt
+|	AlterImportIntoSLOGuardStmt
 |	TrafficStmt
 
 TraceableStmt:
@@ -15572,9 +15612,29 @@ LoadDataOption:
 	{
 		$$ = &ast.LoadDataOpt{Name: strings.ToLower($1)}
 	}
+|	"ENABLE"
+	{
+		$$ = &ast.LoadDataOpt{Name: "enable"}
+	}
+|	"FULL"
+	{
+		$$ = &ast.LoadDataOpt{Name: "full"}
+	}
+|	"CONFIG"
+	{
+		$$ = &ast.LoadDataOpt{Name: "config"}
+	}
 |	identifier "=" SignedLiteral
 	{
 		$$ = &ast.LoadDataOpt{Name: strings.ToLower($1), Value: $3.(ast.ExprNode)}
+	}
+|	"ENABLE" "=" SignedLiteral
+	{
+		$$ = &ast.LoadDataOpt{Name: "enable", Value: $3.(ast.ExprNode)}
+	}
+|	"CONFIG" "=" SignedLiteral
+	{
+		$$ = &ast.LoadDataOpt{Name: "config", Value: $3.(ast.ExprNode)}
 	}
 
 ImportIntoStmt:

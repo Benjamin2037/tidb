@@ -307,6 +307,8 @@ func (e *ShowExec) fetchAll(ctx context.Context) error {
 		return e.fetchShowImportMetering(ctx)
 	case ast.ShowImportCost:
 		return e.fetchShowImportCost(ctx)
+	case ast.ShowImportIntoSLOGuard:
+		return e.fetchShowImportIntoSLOGuard(ctx)
 	case ast.ShowDistributionJobs:
 		return e.fetchShowDistributionJobs(ctx)
 	case ast.ShowAffinity:
@@ -3161,6 +3163,190 @@ func (e *ShowExec) fetchShowImportCost(ctx context.Context) error {
 			row.clusterWriteCost,
 			row.totalCost,
 		})
+	}
+	return nil
+}
+
+func (e *ShowExec) fetchShowImportIntoSLOGuard(ctx context.Context) error {
+	sctx := e.Ctx()
+
+	var hasSuperPriv bool
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
+		hasSuperPriv = pm.RequestVerification(sctx.GetSessionVars().ActiveRoles, "", "", "", mysql.SuperPriv)
+	}
+	// we use sessionCtx from GetTaskManager, user ctx might not have system table privileges.
+	taskManager, err := fstorage.GetTaskManager()
+	ctx = kv.WithInternalSourceType(ctx, kv.InternalDistTask)
+	if err != nil {
+		return err
+	}
+
+	user := ""
+	if currentUser := sctx.GetSessionVars().User; currentUser != nil {
+		user = currentUser.String()
+	}
+
+	newDefaultConfig := func() (*importer.SLOGuardConfig, error) {
+		cfg, _, err := importer.MergeSLOGuardConfigJSON("", "{}")
+		if err != nil {
+			return nil, err
+		}
+		return cfg, nil
+	}
+
+	appendConfigRow := func(jobID int64, cfg *importer.SLOGuardConfig) error {
+		if cfg != nil && strings.TrimSpace(cfg.ConfigJSON) == "" {
+			raw, err := gjson.Marshal(map[string]any{
+				"enable":                          cfg.Enable,
+				"pause_threshold":                 cfg.PauseThreshold,
+				"slow_apply_rate_limit_mb_per_sec": cfg.SlowApplyRateLimitMBPerSec,
+			})
+			if err == nil {
+				cfg.ConfigJSON = string(raw)
+			}
+		}
+		bj, err := types.ParseBinaryJSONFromString(cfg.ConfigJSON)
+		if err != nil {
+			return err
+		}
+		e.result.AppendInt64(0, jobID)
+		e.result.AppendJSON(1, bj)
+		if cfg.Enable {
+			e.result.AppendInt64(2, 1)
+		} else {
+			e.result.AppendInt64(2, 0)
+		}
+		e.result.AppendString(3, cfg.PauseThreshold)
+		e.result.AppendInt64(4, cfg.SlowApplyRateLimitMBPerSec)
+		if cfg.UpdatedAt.IsZero() {
+			e.result.AppendNull(5)
+		} else {
+			e.result.AppendTime(5, cfg.UpdatedAt)
+		}
+		e.result.AppendString(6, cfg.UpdatedBy)
+		return nil
+	}
+
+	if e.ImportJobID != nil {
+		jobID := *e.ImportJobID
+		if jobID == importer.SLOGuardGlobalJobID && !hasSuperPriv {
+			return plannererrors.ErrSpecificAccessDenied.GenWithStackByArgs("SUPER")
+		}
+
+		var cfg *importer.SLOGuardConfig
+		if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+			exec := se.GetSQLExecutor()
+			if jobID != importer.SLOGuardGlobalJobID {
+				if _, err2 := importer.GetJob(ctx, exec, jobID, user, hasSuperPriv); err2 != nil {
+					return err2
+				}
+			}
+			var found bool
+			cfg, found, err = importer.GetSLOGuardConfig(ctx, exec, jobID)
+			if err != nil {
+				return err
+			}
+			if found {
+				return nil
+			}
+			// fallback to global config if job specific config not found
+			if jobID != importer.SLOGuardGlobalJobID {
+				cfg, _, err = importer.GetSLOGuardConfig(ctx, exec, importer.SLOGuardGlobalJobID)
+				if err != nil {
+					return err
+				}
+			}
+			if cfg == nil {
+				cfg, err = newDefaultConfig()
+				if err != nil {
+					return err
+				}
+				cfg.JobID = importer.SLOGuardGlobalJobID
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if err = appendConfigRow(jobID, cfg); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if hasSuperPriv {
+		var configs map[int64]*importer.SLOGuardConfig
+		if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+			exec := se.GetSQLExecutor()
+			var err2 error
+			configs, err2 = importer.GetSLOGuardConfigs(ctx, exec, nil)
+			return err2
+		}); err != nil {
+			return err
+		}
+		if _, ok := configs[importer.SLOGuardGlobalJobID]; !ok {
+			cfg, err := newDefaultConfig()
+			if err != nil {
+				return err
+			}
+			cfg.JobID = importer.SLOGuardGlobalJobID
+			configs[importer.SLOGuardGlobalJobID] = cfg
+		}
+		jobIDs := make([]int64, 0, len(configs))
+		for jobID := range configs {
+			jobIDs = append(jobIDs, jobID)
+		}
+		sort.Slice(jobIDs, func(i, j int) bool { return jobIDs[i] < jobIDs[j] })
+		for _, jobID := range jobIDs {
+			if err := appendConfigRow(jobID, configs[jobID]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	var jobIDs []int64
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		jobs, err2 := importer.GetAllViewableJobs(ctx, exec, user, hasSuperPriv)
+		if err2 != nil {
+			return err2
+		}
+		if len(jobs) == 0 {
+			jobIDs = nil
+			return nil
+		}
+		jobIDs = make([]int64, 0, len(jobs))
+		for _, job := range jobs {
+			if job != nil {
+				jobIDs = append(jobIDs, job.ID)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(jobIDs) == 0 {
+		return nil
+	}
+
+	var configs map[int64]*importer.SLOGuardConfig
+	if err = taskManager.WithNewSession(func(se sessionctx.Context) error {
+		exec := se.GetSQLExecutor()
+		var err2 error
+		configs, err2 = importer.GetSLOGuardConfigs(ctx, exec, jobIDs)
+		return err2
+	}); err != nil {
+		return err
+	}
+	sort.Slice(jobIDs, func(i, j int) bool { return jobIDs[i] < jobIDs[j] })
+	for _, jobID := range jobIDs {
+		cfg, ok := configs[jobID]
+		if !ok {
+			continue
+		}
+		if err := appendConfigRow(jobID, cfg); err != nil {
+			return err
+		}
 	}
 	return nil
 }

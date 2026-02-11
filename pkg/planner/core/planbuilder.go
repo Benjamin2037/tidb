@@ -577,7 +577,7 @@ func (b *PlanBuilder) Build(ctx context.Context, node *resolve.NodeW) (base.Plan
 		*ast.GrantStmt, *ast.DropUserStmt, *ast.AlterUserStmt, *ast.AlterRangeStmt, *ast.RevokeStmt, *ast.KillStmt, *ast.DropStatsStmt,
 		*ast.GrantRoleStmt, *ast.RevokeRoleStmt, *ast.SetRoleStmt, *ast.SetDefaultRoleStmt, *ast.ShutdownStmt,
 		*ast.RenameUserStmt, *ast.NonTransactionalDMLStmt, *ast.SetSessionStatesStmt, *ast.SetResourceGroupStmt, *ast.CancelDistributionJobStmt,
-		*ast.ImportIntoActionStmt, *ast.CalibrateResourceStmt, *ast.AddQueryWatchStmt, *ast.DropQueryWatchStmt, *ast.DropProcedureStmt:
+		*ast.ImportIntoActionStmt, *ast.AlterImportIntoSLOGuardStmt, *ast.CalibrateResourceStmt, *ast.AddQueryWatchStmt, *ast.DropQueryWatchStmt, *ast.DropProcedureStmt:
 		return b.buildSimple(ctx, node.Node.(ast.StmtNode))
 	case ast.DDLNode:
 		if b.ctx.IsCrossKS() {
@@ -4718,6 +4718,12 @@ var (
 		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
 		mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
 	}
+	showImportSLOGuardNames = []string{
+		"Job_ID", "Config", "Enable", "Pause_Threshold", "Slow_Apply_Rate_Limit_MB_Per_Sec", "Updated_At", "Updated_By",
+	}
+	showImportSLOGuardFTypes = []byte{
+		mysql.TypeLonglong, mysql.TypeJSON, mysql.TypeLonglong, mysql.TypeVarchar, mysql.TypeLonglong, mysql.TypeTimestamp, mysql.TypeVarchar,
+	}
 
 	showImportCostNames = []string{
 		"Job_ID", "Metering_Time",
@@ -6226,6 +6232,9 @@ func buildShowSchema(s *ast.ShowStmt, isView bool, isSequence bool) (schema *exp
 	case ast.ShowImportCost:
 		names = showImportCostNames
 		ftypes = showImportCostFTypes
+	case ast.ShowImportIntoSLOGuard:
+		names = showImportSLOGuardNames
+		ftypes = showImportSLOGuardFTypes
 	case ast.ShowDistributionJobs:
 		names = distributionJobsSchemaNames
 		ftypes = distributionJobsSchedulerFTypes
